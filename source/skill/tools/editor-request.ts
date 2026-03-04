@@ -93,6 +93,116 @@ function processArgs(args: any[]): any[] {
   });
 }
 
+type SelectionExecutionResult = {
+  handled: boolean;
+  result?: unknown;
+};
+
+function toUuidList(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  return [];
+}
+
+function getSelectionSnapshot(selectionApi: any, type: string): string[] | null {
+  if (typeof selectionApi?.getSelected !== "function") {
+    return null;
+  }
+  try {
+    return toUuidList(selectionApi.getSelected(type));
+  } catch {
+    return null;
+  }
+}
+
+function updateSelection(selectionApi: any, type: string, uuids: string[]): boolean {
+  if (typeof selectionApi?.update !== "function") {
+    return false;
+  }
+  selectionApi.update(type, uuids);
+  return true;
+}
+
+function executeSelectionCommand(command: string, args: any[]): SelectionExecutionResult {
+  const selectionApi = (Editor as any)?.Selection;
+  const selectionApiType = typeof selectionApi;
+  if (!selectionApi || (selectionApiType !== "object" && selectionApiType !== "function")) {
+    return { handled: false };
+  }
+
+  if (command === "select" || command === "unselect") {
+    const [type, uuidsRaw] = args;
+    if (typeof type !== "string") {
+      throw new Error(`selection:${command} requires first arg 'type' as string`);
+    }
+    const uuids = toUuidList(uuidsRaw);
+    if (uuids.length === 0) {
+      throw new Error(`selection:${command} requires second arg 'uuids' as string[] or string`);
+    }
+    const fn = selectionApi[command];
+    if (typeof fn === "function") {
+      fn.call(selectionApi, type, uuids);
+      return {
+        handled: true,
+        result: {
+          type,
+          uuids,
+          count: uuids.length,
+        },
+      };
+    }
+
+    const currentSelection = getSelectionSnapshot(selectionApi, type);
+    if (currentSelection && updateSelection(selectionApi, type, command === "select"
+      ? Array.from(new Set([...currentSelection, ...uuids]))
+      : currentSelection.filter((uuid) => !uuids.includes(uuid))
+    )) {
+      return {
+        handled: true,
+        result: {
+          type,
+          uuids,
+          count: uuids.length,
+        },
+      };
+    }
+    return { handled: false };
+  }
+
+  if (command === "clear") {
+    const [type] = args;
+    if (typeof type !== "string") {
+      throw new Error("selection:clear requires first arg 'type' as string");
+    }
+    if (typeof selectionApi.clear === "function") {
+      selectionApi.clear(type);
+      return {
+        handled: true,
+        result: {
+          type,
+          cleared: true,
+        },
+      };
+    }
+    if (updateSelection(selectionApi, type, [])) {
+      return {
+        handled: true,
+        result: {
+          type,
+          cleared: true,
+        },
+      };
+    }
+    return { handled: false };
+  }
+
+  return { handled: false };
+}
+
 export function registerEditorRequestTool(server: ToolRegistrar): void {
   server.registerTool(
     "editor_request",
@@ -242,7 +352,13 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
 
         // 调用编辑器 API
         let result: any;
-        if (processedArgs.length === 0) {
+        const selectionResult = normalizedChannel === "selection"
+          ? executeSelectionCommand(normalizedCommand, processedArgs)
+          : { handled: false };
+
+        if (selectionResult.handled) {
+          result = selectionResult.result;
+        } else if (processedArgs.length === 0) {
           result = await Editor.Message.request(normalizedChannel, normalizedCommand);
         } else if (processedArgs.length === 1) {
           result = await Editor.Message.request(normalizedChannel, normalizedCommand, processedArgs[0]);
