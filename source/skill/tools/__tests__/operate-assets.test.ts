@@ -37,6 +37,45 @@ function createRegistrar(): { registrar: ToolRegistrar; getHandler: () => ToolHa
   };
 }
 
+function installCreateOverwriteEditorStub(existingPath: string): MessageCall[] {
+  const calls: MessageCall[] = [];
+  (globalThis as any).Editor = {
+    Project: {
+      path: '',
+    },
+    Message: {
+      request: async (channel: string, command: string, ...args: unknown[]) => {
+        calls.push({ channel, command, args });
+
+        if (channel === 'scene' && command === 'execute-scene-script') {
+          const payload = args[0] as { method?: string } | undefined;
+          if (payload?.method === 'startCaptureSceneLogs') {
+            return undefined;
+          }
+          if (payload?.method === 'getCapturedSceneLogs') {
+            return [];
+          }
+        }
+
+        if (channel === 'asset-db' && command === 'query-asset-info') {
+          if (args[0] === existingPath) {
+            return { uuid: 'existing-asset-uuid', url: existingPath };
+          }
+          return null;
+        }
+
+        if (channel === 'asset-db' && command === 'create-asset') {
+          return { uuid: 'created-asset-uuid' };
+        }
+
+        throw new Error(`unexpected command: ${channel}:${command}`);
+      },
+    },
+  };
+
+  return calls;
+}
+
 function installEditorStub(options: EditorStubOptions): MessageCall[] {
   const existingPathSet = new Set(options.existingPaths);
   const forbiddenCommandSet = new Set(options.forbiddenCommands);
@@ -119,9 +158,10 @@ test('create folder should skip when destination already exists', async () => {
 });
 
 test('copy should skip when destination already exists', async () => {
+  const sourcePath = 'db://assets/source.prefab';
   const destinationPath = 'db://assets/copied-target.prefab';
   const calls = installEditorStub({
-    existingPaths: [destinationPath],
+    existingPaths: [sourcePath, destinationPath],
     forbiddenCommands: ['copy-asset'],
   });
   const { registrar, getHandler } = createRegistrar();
@@ -132,7 +172,7 @@ test('copy should skip when destination already exists', async () => {
     operation: 'copy',
     operationOptions: [
       {
-        originalAssetPath: 'db://assets/source.prefab',
+        originalAssetPath: sourcePath,
         destinationPath,
       },
     ],
@@ -155,9 +195,10 @@ test('copy should skip when destination already exists', async () => {
 });
 
 test('move should skip when destination already exists', async () => {
+  const sourcePath = 'db://assets/source.prefab';
   const destinationPath = 'db://assets/moved-target.prefab';
   const calls = installEditorStub({
-    existingPaths: [destinationPath],
+    existingPaths: [sourcePath, destinationPath],
     forbiddenCommands: ['move-asset'],
   });
   const { registrar, getHandler } = createRegistrar();
@@ -168,7 +209,7 @@ test('move should skip when destination already exists', async () => {
     operation: 'move',
     operationOptions: [
       {
-        originalAssetPath: 'db://assets/source.prefab',
+        originalAssetPath: sourcePath,
         destinationPath,
       },
     ],
@@ -188,6 +229,49 @@ test('move should skip when destination already exists', async () => {
     (call) => call.channel === 'asset-db' && call.command === 'move-asset'
   );
   assert.equal(calledMoveAsset, false);
+});
+
+test('create with overwrite should query first and pass overwrite option', async () => {
+  const existingPath = 'db://assets/cocos-skill-test';
+  const calls = installCreateOverwriteEditorStub(existingPath);
+  const { registrar, getHandler } = createRegistrar();
+  registerOperateAssetsTool(registrar);
+  const handler = getHandler();
+
+  const result = await handler({
+    operation: 'create',
+    operationOptions: [
+      {
+        destinationPath: existingPath,
+        newAssetType: 'Folder',
+        overwrite: true,
+      },
+    ],
+  });
+
+  const text = result.content[0]?.text;
+  assert.ok(text, 'tool should return text response');
+  const body = JSON.parse(text);
+  assert.equal(body.results.length, 1);
+  assert.equal(body.results[0].operation, 'create');
+  assert.equal(body.results[0].path, existingPath);
+  assert.equal(body.results[0].skipped ?? false, false);
+
+  const queryIndex = calls.findIndex(
+    (call) =>
+      call.channel === 'asset-db' &&
+      call.command === 'query-asset-info' &&
+      call.args[0] === existingPath
+  );
+  const createIndex = calls.findIndex(
+    (call) => call.channel === 'asset-db' && call.command === 'create-asset'
+  );
+  assert.notEqual(queryIndex, -1);
+  assert.notEqual(createIndex, -1);
+  assert.ok(queryIndex < createIndex, 'query-asset-info should happen before create-asset');
+
+  const createCall = calls[createIndex];
+  assert.deepEqual(createCall.args[2], { overwrite: true, rename: false });
 });
 
 test('create folder should skip when filesystem path exists but asset-db misses it', async () => {

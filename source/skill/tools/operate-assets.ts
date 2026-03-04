@@ -128,6 +128,30 @@ async function detectExistingAsset(assetPath: string): Promise<AssetInfoLike | n
   return null;
 }
 
+function buildAlreadyExistsResult(
+  operation: "create" | "copy" | "move",
+  options: {
+    path?: string;
+    from?: string;
+    to?: string;
+    existingAsset: AssetInfoLike;
+    originalPath?: string;
+    adjustedPath?: string;
+  }
+) {
+  return {
+    operation,
+    ...(options.path ? { path: options.path } : {}),
+    ...(options.from ? { from: options.from } : {}),
+    ...(options.to ? { to: options.to } : {}),
+    ...(options.existingAsset.uuid ? { uuid: encodeUuid(options.existingAsset.uuid) } : {}),
+    ...(options.originalPath ? { originalPath: options.originalPath } : {}),
+    ...(options.adjustedPath ? { adjustedPath: options.adjustedPath } : {}),
+    skipped: true,
+    reason: "already_exists",
+  };
+}
+
 export function registerOperateAssetsTool(server: ToolRegistrar): void {
   const assetTemplateUrls: { [key: string] : { url: string, ext: string} } = {
     "Prefab": { url: "db://internal/default_file_content/prefab/default.prefab", ext: ".prefab" },
@@ -209,18 +233,13 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
 
                 // Ensure correct extension
                 const finalPath = destinationPath.replace(/\.[^.]*$/, '') + template.ext;
-                if (!overwrite && !rename) {
-                  const existingAsset = await detectExistingAsset(finalPath);
-                  if (existingAsset) {
-                    result = {
-                      operation: "create",
-                      path: finalPath,
-                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
-                      skipped: true,
-                      reason: "already_exists"
-                    };
-                    break;
-                  }
+                const existingAsset = await detectExistingAsset(finalPath);
+                if (existingAsset && !overwrite && !rename) {
+                  result = buildAlreadyExistsResult("create", {
+                    path: finalPath,
+                    existingAsset
+                  });
+                  break;
                 }
 
                 if (template.url && template.url.length > 0) {
@@ -245,24 +264,19 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                             `${finalFileName}.ts` : 
                             `${path.dirname(finalPath)}/${finalFileName}.ts` 
                           : finalPath;
-                        if (!overwrite && !rename && actualPath !== finalPath) {
-                          const existingAdjustedAsset = await detectExistingAsset(actualPath);
-                          if (existingAdjustedAsset) {
-                            result = {
-                              operation: "create",
-                              path: actualPath,
-                              ...(existingAdjustedAsset.uuid ? { uuid: encodeUuid(existingAdjustedAsset.uuid) } : {}),
-                              skipped: true,
-                              reason: "already_exists",
-                              originalPath: finalPath,
-                              adjustedPath: actualPath
-                            };
-                            break;
-                          }
+                        const existingAdjustedAsset = actualPath === finalPath ? existingAsset : await detectExistingAsset(actualPath);
+                        if (existingAdjustedAsset && !overwrite && !rename) {
+                          result = buildAlreadyExistsResult("create", {
+                            path: actualPath,
+                            existingAsset: existingAdjustedAsset,
+                            originalPath: finalPath,
+                            adjustedPath: actualPath
+                          });
+                          break;
                         }
                         
                         // Create asset with processed content
-                        const createResult = await Editor.Message.request('asset-db', 'create-asset', actualPath, processedContent);
+                        const createResult = await Editor.Message.request('asset-db', 'create-asset', actualPath, processedContent, { overwrite, rename });
                         await Editor.Message.request('asset-db', 'refresh-asset', actualPath);
                         if (createResult) {
                           result = { 
@@ -306,7 +320,7 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                   
                 } else {
                   // Create empty asset
-                  const createResult = await Editor.Message.request('asset-db', 'create-asset', finalPath, newAssetType == "Folder" ? null : "");
+                  const createResult = await Editor.Message.request('asset-db', 'create-asset', finalPath, newAssetType == "Folder" ? null : "", { overwrite, rename });
                   if (createResult) {
                     result = { operation: "create", path: finalPath, uuid: encodeUuid(createResult.uuid) };
                   } else {
@@ -321,19 +335,21 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                   errors.push("originalAssetPath and destinationPath are required for copy operation");
                   continue;
                 }
-                if (!overwrite && !rename) {
-                  const existingAsset = await detectExistingAsset(destinationPath);
-                  if (existingAsset) {
-                    result = {
-                      operation: "copy",
-                      from: originalAssetPath,
-                      to: destinationPath,
-                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
-                      skipped: true,
-                      reason: "already_exists"
-                    };
-                    break;
-                  }
+
+                const sourceAsset = await queryAssetInfoSafe(originalAssetPath);
+                if (!sourceAsset) {
+                  errors.push(`Asset not found: ${originalAssetPath}`);
+                  continue;
+                }
+
+                const existingDestination = await detectExistingAsset(destinationPath);
+                if (existingDestination && !overwrite && !rename) {
+                  result = buildAlreadyExistsResult("copy", {
+                    from: originalAssetPath,
+                    to: destinationPath,
+                    existingAsset: existingDestination
+                  });
+                  break;
                 }
 
                 const copyResult = await Editor.Message.request('asset-db', 'copy-asset', originalAssetPath, destinationPath, { overwrite, rename });
@@ -351,19 +367,21 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                   errors.push("originalAssetPath and destinationPath are required for move operation");
                   continue;
                 }
-                if (!overwrite && !rename) {
-                  const existingAsset = await detectExistingAsset(destinationPath);
-                  if (existingAsset) {
-                    result = {
-                      operation: "move",
-                      from: originalAssetPath,
-                      to: destinationPath,
-                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
-                      skipped: true,
-                      reason: "already_exists"
-                    };
-                    break;
-                  }
+
+                const sourceAsset = await queryAssetInfoSafe(originalAssetPath);
+                if (!sourceAsset) {
+                  errors.push(`Asset not found: ${originalAssetPath}`);
+                  continue;
+                }
+
+                const existingDestination = await detectExistingAsset(destinationPath);
+                if (existingDestination && !overwrite && !rename) {
+                  result = buildAlreadyExistsResult("move", {
+                    from: originalAssetPath,
+                    to: destinationPath,
+                    existingAsset: existingDestination
+                  });
+                  break;
                 }
 
                 const moveResult = await Editor.Message.request('asset-db', 'move-asset', originalAssetPath, destinationPath, { overwrite, rename });
