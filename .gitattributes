@@ -1,0 +1,7 @@
+# Enforce consistent line endings across platforms.
+* text=auto eol=lf
+
+# Keep Windows-native scripts in CRLF when they are introduced.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

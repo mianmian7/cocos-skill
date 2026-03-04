@@ -1,0 +1,78 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 使用 esbuild 打包（依赖已 bundle 进 dist，只有 sharp 等原生模块在 dist/node_modules）
+      - name: Build with esbuild
+        run: npm run build
+
+      # 使用项目自带的打包脚本生成分发 zip
+      - name: Package distribution zip
+        if: ${{ github.event_name != 'pull_request' }}
+        run: npm run package
+
+      # 重命名 zip 文件（加入版本号或 commit sha）
+      - name: Rename zip for release
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          # 获取 package.json 中的版本号
+          VERSION=$(node -p "require('./package.json').version")
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # tag 构建：使用 tag 名称
+            ZIP_NAME="cocos-skill-${GITHUB_REF_NAME}.zip"
+          else
+            # 非 tag 构建：使用版本号 + 短 sha
+            ZIP_NAME="cocos-skill-v${VERSION}-${GITHUB_SHA::7}.zip"
+          fi
+
+          mv release/cocos-skill-v${VERSION}.zip "${ZIP_NAME}"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          ls -lah "${ZIP_NAME}"
+
+      # 上传构建产物
+      - name: Upload artifact (zip)
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cocos-skill-zip
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 7
+
+      # tag 构建：创建 GitHub Release
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true

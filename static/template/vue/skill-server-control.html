@@ -1,0 +1,21 @@
+<div class="skill-server-control">
+  <div class="minimal-container">
+    <!-- Main Toggle Section -->
+    <div class="toggle-section">
+      <div class="status-badge" :class="{ 'active': serverInfo.isRunning }">
+        <span class="status-dot"></span>
+        <span class="status-text">{{ serverInfo.isRunning ? 'Running' : 'Stopped' }}</span>
+      </div>
+      
+      <button 
+        class="toggle-button" 
+        :class="{ 'active': serverInfo.isRunning, 'loading': isLoading }"
+        @click="toggleServer"
+        :disabled="isLoading">
+        <span class="toggle-slider"></span>
+      </button>
+      
+      <div class="version-badge">v{{ VERSION }}</div>
+    </div>
+  </div>
+</div>
