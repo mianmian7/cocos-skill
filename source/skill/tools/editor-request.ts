@@ -119,8 +119,8 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
 **获取可用命令列表：**
 调用时设置 listCommands=true 可获取所有可用命令及参数说明。`,
       inputSchema: {
-        channel: z.string().describe("消息通道：scene | asset-db | selection | project"),
-        command: z.string().describe("命令名称，如 query-node, set-property"),
+        channel: z.string().optional().describe("消息通道：scene | asset-db | selection | project"),
+        command: z.string().optional().describe("命令名称，如 query-node, set-property"),
         args: z.array(z.any()).default([]).describe("命令参数数组"),
         listCommands: z.boolean().default(false).describe("设为 true 时返回所有可用命令列表"),
         encodeResultUuids: z.boolean().default(true).describe("是否将结果中的 UUID 编码为短格式"),
@@ -190,8 +190,31 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         };
       }
 
+      const normalizedChannel = typeof channel === "string" ? channel.trim() : "";
+      const normalizedCommand = typeof command === "string" ? command.trim() : "";
+      if (!normalizedChannel || !normalizedCommand) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  success: false,
+                  error: "channel and command are required when listCommands=false",
+                  hint: "Set listCommands=true to list all available commands",
+                  availableChannels: getAvailableChannels(),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+
       // 检查是否在 allowlist 中
-      const allowed = getCommandSchema(channel, command);
+      const allowed = getCommandSchema(normalizedChannel, normalizedCommand);
       if (!allowed) {
         return {
           content: [
@@ -200,7 +223,7 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
               text: JSON.stringify(
                 {
                   success: false,
-                  error: `Command '${channel}:${command}' is not in the allowlist`,
+                  error: `Command '${normalizedChannel}:${normalizedCommand}' is not in the allowlist`,
                   hint: "Set listCommands=true to see available commands",
                   availableChannels: getAvailableChannels(),
                 },
@@ -220,20 +243,20 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         // 调用编辑器 API
         let result: any;
         if (processedArgs.length === 0) {
-          result = await Editor.Message.request(channel, command);
+          result = await Editor.Message.request(normalizedChannel, normalizedCommand);
         } else if (processedArgs.length === 1) {
-          result = await Editor.Message.request(channel, command, processedArgs[0]);
+          result = await Editor.Message.request(normalizedChannel, normalizedCommand, processedArgs[0]);
         } else {
-          result = await Editor.Message.request(channel, command, ...processedArgs);
+          result = await Editor.Message.request(normalizedChannel, normalizedCommand, ...processedArgs);
         }
 
         // 特殊处理：query-node-tree 限制深度和节点数
-        if (channel === "scene" && command === "query-node-tree") {
+        if (normalizedChannel === "scene" && normalizedCommand === "query-node-tree") {
           result = limitNodeTree(result, maxDepth, maxNodes);
         }
 
         // 特殊处理：query-node 精简输出
-        if (channel === "scene" && command === "query-node") {
+        if (normalizedChannel === "scene" && normalizedCommand === "query-node") {
           result = simplifyNodeInfo(result, summarize);
         }
 
@@ -246,8 +269,8 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         let outputText = JSON.stringify(
           {
             success: true,
-            channel,
-            command,
+            channel: normalizedChannel,
+            command: normalizedCommand,
             mode: allowed.mode,
             result,
           },
@@ -259,12 +282,12 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         if (outputText.length > maxResultSize) {
           if (summarize) {
             // 返回摘要
-            const summary = generateResultSummary(result, channel, command);
+            const summary = generateResultSummary(result, normalizedChannel, normalizedCommand);
             outputText = JSON.stringify(
               {
                 success: true,
-                channel,
-                command,
+                channel: normalizedChannel,
+                command: normalizedCommand,
                 mode: allowed.mode,
                 truncated: true,
                 originalSize: outputText.length,
@@ -296,8 +319,8 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
               text: JSON.stringify(
                 {
                   success: false,
-                  channel,
-                  command,
+                  channel: normalizedChannel,
+                  command: normalizedCommand,
                   error: error.message || String(error),
                 },
                 null,
