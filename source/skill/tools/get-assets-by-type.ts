@@ -1,7 +1,35 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
-import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { encodeUuid } from "../uuid-codec.js";
+
+const ASSET_TYPE_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "cc.TypeScript": ["cc.TypeScript", "cc.Script"],
+  "cc.Script": ["cc.Script", "cc.TypeScript"],
+});
+
+function getAssetTypeCandidates(ccType: string): Set<string> {
+  const normalizedType = ccType.trim();
+  const aliases = ASSET_TYPE_ALIASES[normalizedType] ?? [];
+  return new Set([normalizedType, ...aliases]);
+}
+
+function matchesRequestedAssetType(assetInfo: any, typeCandidates: Set<string>): boolean {
+  if (!assetInfo || typeof assetInfo !== "object") {
+    return false;
+  }
+
+  const assetType = typeof assetInfo.type === "string" ? assetInfo.type : "";
+  if (assetType && typeCandidates.has(assetType)) {
+    return true;
+  }
+
+  const inheritedTypes: string[] = Array.isArray(assetInfo.extends)
+    ? assetInfo.extends.filter((entry: unknown): entry is string => typeof entry === "string")
+    : [];
+
+  return inheritedTypes.some((entry: string) => typeCandidates.has(entry));
+}
 
 export function registerGetAssetsByTypeTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -20,6 +48,7 @@ export function registerGetAssetsByTypeTool(server: ToolRegistrar): void {
       try {
         const errors: string[] = [];
         let assets: Array<{ name: string; url: string; uuid: string }> = [];
+        const typeCandidates = getAssetTypeCandidates(ccType);
 
         try {
           // Query for assets of the specified type
@@ -29,7 +58,11 @@ export function registerGetAssetsByTypeTool(server: ToolRegistrar): void {
 
           if (assetInfos && Array.isArray(assetInfos)) {
             assets = assetInfos
-              .filter((assetInfo: any) => assetInfo && assetInfo.url && (assetInfo.type == ccType || assetInfo.extends.includes(ccType)) && (!nameFilter || assetInfo.name.includes(nameFilter)))
+              .filter((assetInfo: any) => {
+                const hasName = typeof assetInfo?.name === "string";
+                const matchesName = !nameFilter || (hasName && assetInfo.name.includes(nameFilter));
+                return Boolean(assetInfo?.url) && matchesRequestedAssetType(assetInfo, typeCandidates) && matchesName;
+              })
               .map((assetInfo: any) => ({
                 name: assetInfo.name || 'Unknown',
                 url: assetInfo.url,

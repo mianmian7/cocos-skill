@@ -2,9 +2,9 @@
  * HTTP adapter for the transport-agnostic ToolRegistry.
  */
 
-import { ToolRegistry } from '../core/tool-registry.js';
+import { ToolRegistry, ToolValidationError } from '../core/tool-registry.js';
 
-export { ToolRegistry };
+export { ToolRegistry, ToolValidationError };
 export type { ToolDefinition, ToolResult } from '../core/tool-contract.js';
 
 let globalRegistry: ToolRegistry | null = null;

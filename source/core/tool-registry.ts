@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import { ToolDefinition, ToolRegistration, ToolResult } from './tool-contract.js';
 
+export class ToolValidationError extends Error {
+  readonly issues: z.ZodIssue[];
+
+  constructor(message: string, issues: z.ZodIssue[]) {
+    super(message);
+    this.name = 'ToolValidationError';
+    this.issues = issues;
+  }
+}
+
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
   private static readonly NUMBER_PATTERN = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i;
@@ -57,7 +67,7 @@ export class ToolRegistry {
       return result;
     } catch (error) {
       if (error instanceof z.ZodError) {
-        throw new Error(`Validation error: ${error.message}`);
+        throw new ToolValidationError(`Validation error: ${error.message}`, error.issues);
       }
       throw error;
     }

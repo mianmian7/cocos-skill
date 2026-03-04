@@ -7,7 +7,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer, Server as HttpServer } from 'http';
-import { ToolRegistry, getToolRegistry } from './tool-registry.js';
+import { ToolRegistry, ToolValidationError, getToolRegistry } from './tool-registry.js';
 import { ConfigStorage } from '../skill/config-storage.js';
 import { SkillServerConfig, DEFAULT_SERVER_CONFIG } from '../skill/config.js';
 
@@ -157,6 +157,48 @@ export class HttpToolServer {
         console.log(`Registered ${this.toolRegistry.getToolNames().length} tools`);
     }
 
+    private buildErrorResponse(error: unknown, toolName?: string): { statusCode: number; body: Record<string, unknown> } {
+        const message = error instanceof Error ? error.message : String(error);
+        const addToolName = (body: Record<string, unknown>): Record<string, unknown> => {
+            return toolName ? { ...body, tool: toolName } : body;
+        };
+
+        if (error instanceof ToolValidationError) {
+            return {
+                statusCode: 422,
+                body: addToolName({
+                    error: message,
+                    type: 'validation_error',
+                    details: error.issues.map((issue) => ({
+                        path: issue.path.join('.'),
+                        code: issue.code,
+                        message: issue.message,
+                    })),
+                }),
+            };
+        }
+
+        if (message.startsWith('Validation error:')) {
+            return {
+                statusCode: 422,
+                body: addToolName({
+                    error: message,
+                    type: 'validation_error',
+                }),
+            };
+        }
+
+        return {
+            statusCode: 500,
+            body: addToolName({ error: message }),
+        };
+    }
+
+    private respondWithToolError(res: Response, error: unknown, toolName?: string): void {
+        const { statusCode, body } = this.buildErrorResponse(error, toolName);
+        res.status(statusCode).json(body);
+    }
+
     /**
      * Set up Express routes
      */
@@ -210,10 +252,7 @@ export class HttpToolServer {
                     res.json(result);
                 } catch (error) {
                     console.error(`Error executing ${toolName}:`, error);
-                    res.status(500).json({
-                        error: error instanceof Error ? error.message : String(error),
-                        tool: toolName
-                    });
+                    this.respondWithToolError(res, error, toolName);
                 }
             });
         }
@@ -225,9 +264,7 @@ export class HttpToolServer {
                 res.json(result);
             } catch (error) {
                 console.error('Error executing get_editor_context:', error);
-                res.status(500).json({
-                    error: error instanceof Error ? error.message : String(error)
-                });
+                this.respondWithToolError(res, error, 'get_editor_context');
             }
         });
 
@@ -243,10 +280,7 @@ export class HttpToolServer {
                 res.json(result);
             } catch (error) {
                 console.error(`Error executing ${toolName}:`, error);
-                res.status(500).json({
-                    error: error instanceof Error ? error.message : String(error),
-                    tool: toolName
-                });
+                this.respondWithToolError(res, error, toolName);
             }
         });
     }

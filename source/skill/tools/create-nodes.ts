@@ -5,6 +5,77 @@ import { getComponentInfo, tryToAddComponent } from "../tool-utils";
 import packageJSON from '../../../package.json';
 
 export function registerCreateNodesTool(server: ToolRegistrar): void {
+  const extractCreatedNodeUuid = (createNodeResult: unknown): string | undefined => {
+    if (typeof createNodeResult === "string") {
+      return createNodeResult;
+    }
+
+    if (Array.isArray(createNodeResult)) {
+      const firstString = createNodeResult.find((entry) => typeof entry === "string");
+      return typeof firstString === "string" ? firstString : undefined;
+    }
+
+    return undefined;
+  };
+
+  const queryNodesByPrefabAssetUuid = async (assetUuid: string): Promise<string[]> => {
+    const result = await Editor.Message.request('scene', 'query-nodes-by-asset-uuid', assetUuid);
+    if (!Array.isArray(result)) {
+      return [];
+    }
+
+    return result.filter((entry): entry is string => typeof entry === "string");
+  };
+
+  const isLinkedToPrefabAsset = (nodeInfo: any, assetUuid: string): boolean => {
+    if (!nodeInfo || typeof nodeInfo !== "object") {
+      return false;
+    }
+
+    const prefabInfo = nodeInfo.__prefab__ || nodeInfo._prefab || nodeInfo.prefab;
+    const linkedPrefabUuid =
+      prefabInfo?.uuid || prefabInfo?.assetUuid || prefabInfo?.asset?.uuid || prefabInfo?.value?.uuid;
+
+    return typeof linkedPrefabUuid === "string" && linkedPrefabUuid === assetUuid;
+  };
+
+  const resolvePrefabInstanceUuid = async (
+    fallbackUuid: string,
+    assetUuid: string,
+    linkedNodesBeforeCreate: Set<string>
+  ): Promise<string> => {
+    let linkedNodesAfterCreate: string[] = [];
+    try {
+      linkedNodesAfterCreate = await queryNodesByPrefabAssetUuid(assetUuid);
+    } catch {
+      return fallbackUuid;
+    }
+
+    const newlyLinkedNodes = linkedNodesAfterCreate.filter((uuid) => !linkedNodesBeforeCreate.has(uuid));
+    if (newlyLinkedNodes.length === 1) {
+      return newlyLinkedNodes[0];
+    }
+
+    if (newlyLinkedNodes.length > 1) {
+      return newlyLinkedNodes.includes(fallbackUuid) ? fallbackUuid : newlyLinkedNodes[0];
+    }
+
+    try {
+      const fallbackNodeInfo = await Editor.Message.request('scene', 'query-node', fallbackUuid);
+      if (isLinkedToPrefabAsset(fallbackNodeInfo, assetUuid)) {
+        return fallbackUuid;
+      }
+    } catch {
+      // Keep fallback behavior.
+    }
+
+    if (linkedNodesAfterCreate.includes(fallbackUuid)) {
+      return fallbackUuid;
+    }
+
+    return linkedNodesAfterCreate[0] ?? fallbackUuid;
+  };
+
   // Helper function to get root scene node
   const getRootSceneNode = async (): Promise<string> => {
     const hierarchy = await Editor.Message.request('scene', 'query-node-tree') as any;
@@ -113,7 +184,12 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
               const result = await Editor.Message.request('scene', 'create-node', {
                 parent: targetParentUuid
               });
-              nodeUuid = Array.isArray(result) ? result[0] : result;
+              const extractedUuid = extractCreatedNodeUuid(result);
+              if (!extractedUuid) {
+                errors.push(`Failed to create node of type ${nodeSpec.type}: create-node did not return UUID`);
+                continue;
+              }
+              nodeUuid = extractedUuid;
             } else if (nodeSpec.type === "Prefab") {
               if (!nodeSpec.prefabUuid) {
                 errors.push(`Prefab UUID is required for node type "Prefab"`);
@@ -134,13 +210,26 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
                 // It's already a UUID, decode it
                 assetUuid = decodeUuid(nodeSpec.prefabUuid);
               }
+
+              let linkedNodesBeforeCreate = new Set<string>();
+              try {
+                linkedNodesBeforeCreate = new Set(await queryNodesByPrefabAssetUuid(assetUuid));
+              } catch {
+                // Keep empty baseline when query fails.
+              }
               
               // Create prefab instance
               const result = await Editor.Message.request('scene', 'create-node', {
                 parent: targetParentUuid,
                 assetUuid: assetUuid
               });
-              nodeUuid = Array.isArray(result) ? result[0] : result;
+              const fallbackUuid = extractCreatedNodeUuid(result);
+              if (!fallbackUuid) {
+                errors.push(`Failed to create node of type ${nodeSpec.type}: create-node did not return UUID`);
+                continue;
+              }
+
+              nodeUuid = await resolvePrefabInstanceUuid(fallbackUuid, assetUuid, linkedNodesBeforeCreate);
             } else {
               // Create node from template - first get the actual UUID
               const template = nodeTypesMap[nodeSpec.type];
@@ -164,7 +253,12 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
                   unlinkPrefab: true,
                   canvasRequired: template.requireCanvas
                 });
-                nodeUuid = Array.isArray(result) ? result[0] : result;
+                const extractedUuid = extractCreatedNodeUuid(result);
+                if (!extractedUuid) {
+                  errors.push(`Failed to create node of type ${nodeSpec.type}: create-node did not return UUID`);
+                  continue;
+                }
+                nodeUuid = extractedUuid;
               } catch (templateError) {
                 errors.push(`Error creating ${nodeSpec.type} node: ${templateError instanceof Error ? templateError.message : String(templateError)}`);
                 continue;

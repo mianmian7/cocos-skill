@@ -30,7 +30,7 @@ async function executeCodeInScene(
     // If returnResult is true, wrap the code to capture the result
     if (context.returnResult) {
       executableCode = `
-        (function() {
+        return (function() {
           ${code}
         })();
       `;

@@ -44,6 +44,25 @@ interface GetContextOptions {
   parentUuid?: string;        // 新：只查询某个父节点下的子节点
 }
 
+function applyModeFallback(context: EditorContext): void {
+  if (context.mode !== 'unknown') {
+    return;
+  }
+
+  if (context.currentPrefab) {
+    context.mode = 'prefab';
+    return;
+  }
+
+  const hasSceneSignals = Boolean(context.currentScene)
+    || Boolean(context.hierarchy && context.hierarchy.totalNodeCount > 0)
+    || context.selectedNodes.length > 0;
+
+  if (hasSceneSignals) {
+    context.mode = 'scene';
+  }
+}
+
 async function getEditorContext(options: GetContextOptions): Promise<EditorContext> {
   const {
     includeHierarchy = true,
@@ -73,6 +92,10 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
       context.mode = 'scene';
     }
   } catch {
+    // ignore
+  }
+
+  if (context.mode === 'unknown') {
     try {
       const prefabInfo: any = await Editor.Message.request('scene', 'query-prefab-info');
       if (prefabInfo) {
@@ -211,6 +234,21 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
       // ignore
     }
   }
+
+  // hierarchy 之后再次尝试 prefab 信息，避免 query-scene-info 无异常但返回空时 mode 悬空
+  if (context.mode === 'unknown') {
+    try {
+      const prefabInfo: any = await Editor.Message.request('scene', 'query-prefab-info');
+      if (prefabInfo) {
+        context.currentPrefab = prefabInfo.url || prefabInfo.name;
+        context.mode = 'prefab';
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  applyModeFallback(context);
 
   // 4. 获取最近日志
   if (includeRecentLogs && !summaryOnly) {

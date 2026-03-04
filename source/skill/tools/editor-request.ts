@@ -119,8 +119,8 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
 **获取可用命令列表：**
 调用时设置 listCommands=true 可获取所有可用命令及参数说明。`,
       inputSchema: {
-        channel: z.string().optional().describe("消息通道：scene | asset-db | selection | project"),
-        command: z.string().optional().describe("命令名称，如 query-node, set-property"),
+        channel: z.string().optional().default("").describe("消息通道：scene | asset-db | selection | project"),
+        command: z.string().optional().default("").describe("命令名称，如 query-node, set-property"),
         args: z.array(z.any()).default([]).describe("命令参数数组"),
         listCommands: z.boolean().default(false).describe("设为 true 时返回所有可用命令列表"),
         encodeResultUuids: z.boolean().default(true).describe("是否将结果中的 UUID 编码为短格式"),
