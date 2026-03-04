@@ -51,16 +51,20 @@ async function queryDirtyState(
   request: EditorRequestFn,
   sceneInfo: Record<string, unknown> | null
 ): Promise<boolean | null> {
+  try {
+    const dirty = await request('scene', 'query-dirty');
+    const parsedDirty = toBoolean(dirty);
+    if (parsedDirty !== null) {
+      return parsedDirty;
+    }
+  } catch {
+    // ignore
+  }
   const dirtyFromInfo = toBoolean(sceneInfo?.dirty);
   if (dirtyFromInfo !== null) {
     return dirtyFromInfo;
   }
-  try {
-    const dirty = await request('scene', 'query-dirty');
-    return toBoolean(dirty);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 function buildNotDirtyResult(sceneUrl: string | null): SaveSceneResult {

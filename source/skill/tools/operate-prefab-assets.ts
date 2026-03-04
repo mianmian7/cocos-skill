@@ -2,6 +2,7 @@ import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { saveSceneNonInteractive } from "./scene-save.js";
 
 export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -118,10 +119,122 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     }
-  );
+	  );
 
-  const createPrefabFromNode = async (options: { nodeUuid: string, assetPath: string, removeOriginal: boolean }, errors: string[], notes: string[]) => {
-    let { nodeUuid, assetPath, removeOriginal } = options;
+	  const extractUuidValue = (input: unknown): string | null => {
+	    if (typeof input === 'string') {
+	      return input;
+	    }
+	    if (!input || typeof input !== 'object') {
+	      return null;
+	    }
+
+	    const record = input as Record<string, unknown>;
+	    if (typeof record.uuid === 'string') {
+	      return record.uuid;
+	    }
+	    if (record.uuid) {
+	      const nestedUuid = extractUuidValue(record.uuid);
+	      if (nestedUuid) {
+	        return nestedUuid;
+	      }
+	    }
+	    if (typeof record.value === 'string') {
+	      return record.value;
+	    }
+	    if (record.value) {
+	      const nestedValue = extractUuidValue(record.value);
+	      if (nestedValue) {
+	        return nestedValue;
+	      }
+	    }
+
+	    return null;
+	  };
+
+	  const extractPrefabUuidFromNodeInfo = (nodeInfo: any): string | null => {
+	    const prefabInfo = nodeInfo?.__prefab__ || nodeInfo?._prefab || nodeInfo?.prefab;
+	    return (
+	      extractUuidValue(prefabInfo?.uuid) ||
+	      extractUuidValue(prefabInfo?.assetUuid) ||
+	      extractUuidValue(prefabInfo?.asset?.uuid)
+	    );
+	  };
+
+	  const queryNodeInfoSafe = async (nodeUuid: string): Promise<any | null> => {
+	    try {
+	      return await Editor.Message.request('scene', 'query-node', nodeUuid);
+	    } catch {
+	      return null;
+	    }
+	  };
+
+	  const findLinkedNodeUuidInTree = (tree: any, prefabUuid: string): string | null => {
+	    const stack: any[] = [];
+	    const roots = Array.isArray(tree?.children) ? tree.children : [];
+	    stack.push(...roots);
+
+	    while (stack.length > 0) {
+	      const node = stack.pop();
+	      const linkedPrefabUuid = extractPrefabUuidFromNodeInfo(node);
+	      if (linkedPrefabUuid === prefabUuid) {
+	        const nodeUuid = extractUuidValue(node?.uuid);
+	        if (nodeUuid) {
+	          return nodeUuid;
+	        }
+	      }
+
+	      if (Array.isArray(node?.children) && node.children.length > 0) {
+	        stack.push(...node.children);
+	      }
+	    }
+
+	    return null;
+	  };
+
+	  const resolveLinkedNodeUuid = async (originalNodeUuid: string, prefabUuid: string): Promise<string | null> => {
+	    const originalNodeInfo = await queryNodeInfoSafe(originalNodeUuid);
+	    if (originalNodeInfo && extractPrefabUuidFromNodeInfo(originalNodeInfo) === prefabUuid) {
+	      return originalNodeUuid;
+	    }
+
+	    try {
+	      const linkedNodeCandidates = await Editor.Message.request('scene', 'query-nodes-by-asset-uuid', prefabUuid);
+	      if (Array.isArray(linkedNodeCandidates)) {
+	        let fallbackCandidate: string | null = null;
+	        for (const candidate of linkedNodeCandidates) {
+	          if (typeof candidate !== 'string') {
+	            continue;
+	          }
+
+	          if (!fallbackCandidate) {
+	            fallbackCandidate = candidate;
+	          }
+
+	          const candidateInfo = await queryNodeInfoSafe(candidate);
+	          if (candidateInfo && extractPrefabUuidFromNodeInfo(candidateInfo) === prefabUuid) {
+	            return candidate;
+	          }
+	        }
+
+	        if (fallbackCandidate) {
+	          return fallbackCandidate;
+	        }
+	      }
+	    } catch {
+	      // Keep fallback behavior.
+	    }
+
+	    try {
+	      const sceneNodes = await Editor.Message.request('scene', 'query-node-tree');
+	      return findLinkedNodeUuidInTree(sceneNodes, prefabUuid);
+	    } catch {
+	      return null;
+	    }
+	  };
+
+	  const createPrefabFromNode = async (options: { nodeUuid: string, assetPath: string, removeOriginal: boolean }, errors: string[], notes: string[]) => {
+	    let { nodeUuid, assetPath, removeOriginal } = options;
 
     let prefabUuid: string | null = null;
     let linkedNodeUuid: string | null = null;
@@ -172,29 +285,10 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
           }
         }
 
-        // Find node with linked prefab which now has new UUID
-        if (prefabUuid) {
-          // Query the scene to find nodes with this prefab
-          const sceneNodes = await Editor.Message.request('scene', 'query-node-tree') as any;
-          if (sceneNodes) {
-            // Recursively search for the node with the prefab UUID
-            const findNodeWithPrefab = (nodes: any[]): string | null => {
-              for (const node of nodes) {
-                if (node.prefab?.assetUuid === prefabUuid) {
-                  return node.uuid;
-                }
-                if (node.children) {
-                  const found = findNodeWithPrefab(node.children);
-                  if (found) {
-                    return found;
-                  }
-                }
-              }
-              return null;
-            }
-            linkedNodeUuid = findNodeWithPrefab(sceneNodes.children);
-          }
-        }
+	        // Resolve the actual linked node UUID after prefab creation.
+	        if (prefabUuid) {
+	          linkedNodeUuid = await resolveLinkedNodeUuid(decodedNodeUuid, prefabUuid);
+	        }
 
         // Optionally remove the original node
         if (linkedNodeUuid && removeOriginal) {
@@ -255,6 +349,14 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
             throw new Error(`Asset '${assetToOpenUrlOrUuid}' is not a prefab (type: ${assetInfo.type})`);
           }
         }
+      }
+
+      const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+        Editor.Message.request(channel, command, ...args)
+      );
+      if (!saveResult.success) {
+        errors.push(`Failed to save current scene before opening prefab: ${saveResult.error || 'unknown error'}`);
+        return;
       }
 
       // Open prefab for editing using Cocos Creator API

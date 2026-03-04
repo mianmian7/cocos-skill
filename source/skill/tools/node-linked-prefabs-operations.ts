@@ -2,6 +2,7 @@ import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { saveSceneNonInteractive } from "./scene-save.js";
 
 export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -41,6 +42,19 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
               switch (operation) {
                 case "edit-prefab": {
                   try {
+                    const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+                      Editor.Message.request(channel, command, ...args)
+                    );
+                    if (!saveResult.success) {
+                      errors.push(`Failed to save current scene before opening prefab: ${saveResult.error || "unknown error"}`);
+                      operationResult = {
+                        success: false,
+                        message: 'Save before context switch failed',
+                        prefabUuid: encodedPrefabUuid
+                      };
+                      break;
+                    }
+
                     // Open prefab for editing
                     await Editor.Message.request('asset-db', 'open-asset', prefabUuid);
                     operationResult = {
@@ -57,16 +71,17 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
                 case "unwrap": {
                   try {
                     // Use scene script to dump the node properly for prefab creation
-                    let unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
+                    const unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
                       name: packageJSON.name,
                       method: 'unlinkPrefabByNode',
                       args: [decodedNodeUuid, false]
-                    }) as boolean;
-                    if (!unlinkResult) {
+                    }) as boolean | null | undefined;
+                    const unlinkSucceeded = unlinkResult !== false;
+                    if (!unlinkSucceeded) {
                       errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
                     }
                     operationResult = {
-                      success: unlinkResult,
+                      success: unlinkSucceeded,
                       message: `Node unlinked from prefab (single level)`,
                       prefabUuid: encodedPrefabUuid
                     };
@@ -79,16 +94,17 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
                 case "unwrap-completely": {
                   try {
                     // Use scene script to dump the node properly for prefab creation
-                    let unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
+                    const unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
                       name: packageJSON.name,
                       method: 'unlinkPrefabByNode',
                       args: [decodedNodeUuid, true]
-                    }) as boolean;
-                    if (!unlinkResult) {
+                    }) as boolean | null | undefined;
+                    const unlinkSucceeded = unlinkResult !== false;
+                    if (!unlinkSucceeded) {
                       errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
                     }
                     operationResult = {
-                      success: unlinkResult,
+                      success: unlinkSucceeded,
                       message: `Node unlinked from prefab (recursive)`,
                       prefabUuid: encodedPrefabUuid
                     };

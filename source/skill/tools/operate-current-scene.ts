@@ -72,6 +72,22 @@ export function registerOperateCurrentSceneTool(server: ToolRegistrar): void {
               sceneInfo = assetInfo;
             }
 
+            const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+              Editor.Message.request(channel, command, ...args)
+            );
+            if (!saveResult.success) {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    success: false,
+                    error: `Failed to save current scene before opening target scene: ${saveResult.error || "unknown error"}`,
+                    saveResult
+                  })
+                }]
+              };
+            }
+
             await Editor.Message.request('scene', 'open-scene', sceneUuid);
             if (!sceneInfo) {
               try {

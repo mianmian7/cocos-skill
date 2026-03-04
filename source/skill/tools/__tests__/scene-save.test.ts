@@ -124,3 +124,29 @@ test('falls back to query-dirty when scene info has no dirty field', async () =>
   assert.equal(calls.some((call) => call.command === 'query-dirty'), true);
   assert.equal(calls.some((call) => call.command === 'save-scene'), true);
 });
+
+test('prefers query-dirty over scene-info dirty when they conflict', async () => {
+  const sceneUrl = 'db://assets/scenes/Main.scene';
+  const { request, calls } = createRequestStub(async (_channel, command, args) => {
+    if (command === 'query-scene-info') {
+      return { url: sceneUrl, dirty: false };
+    }
+    if (command === 'query-dirty') {
+      return true;
+    }
+    if (command === 'save-scene') {
+      assert.equal(args.length, 0);
+      return sceneUrl;
+    }
+    throw new Error(`unexpected command: ${command}`);
+  });
+
+  const result = await saveSceneNonInteractive(request);
+
+  assert.equal(result.success, true);
+  assert.equal(result.saved, true);
+  assert.equal(result.skipped, false);
+  assert.equal(result.sceneUrl, sceneUrl);
+  assert.equal(calls.some((call) => call.command === 'query-dirty'), true);
+  assert.equal(calls.some((call) => call.command === 'save-scene'), true);
+});
