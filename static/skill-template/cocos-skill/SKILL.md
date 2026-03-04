@@ -317,9 +317,10 @@ Component properties use `__comps__.{index}.{property}` path format, where index
 
 1. **Always start with `/skill/context`** to understand the current editor state before making changes. Prefer `POST`; `GET` is compatible.
 2. **Port discovery**: Read `${projectRoot}/.cocos-skill-config.json` and use `baseUrl` (or `port`) before any API call.
-3. **Large scenes (3000+ nodes)**: Use `summaryOnly=true` with `get_editor_context`, then `search_nodes` to find specific nodes.
-4. **UUID format**: Node/component UUIDs are auto-encoded (Base64) in responses. Pass them back as-is — the server decodes them automatically.
-5. **Verify after changes**: Always call `/skill/context` (prefer `POST`) or `search_nodes` after modifications to confirm success.
-6. **Use high-level tools first**: Prefer `/skill/create-nodes`, `/skill/modify-nodes` over raw `editor_request` — they handle serialization and error recovery.
-7. **Fallback to `editor_request`**: For operations not covered by high-level tools (e.g., `focus-camera`, `duplicate-node`, asset-db queries), use the editor request gateway.
-8. **Gated actions**: Destructive operations (`delete_nodes`, `clear_scene`, etc.) require two-step approval. Always handle the token flow.
+3. **Asset operations must preflight-query first**: Before `create/copy/move`, always query destination with `asset-db.query-asset-info` (or `/skill/editor-request`) and decide explicitly: `skip` when exists and neither `overwrite` nor `rename` is set. For `copy/move`, also query source and fail fast if source is missing.
+4. **Large scenes (3000+ nodes)**: Use `summaryOnly=true` with `get_editor_context`, then `search_nodes` to find specific nodes.
+5. **UUID format**: Node/component UUIDs are auto-encoded (Base64) in responses. Pass them back as-is — the server decodes them automatically.
+6. **Verify after changes**: Always call `/skill/context` (prefer `POST`) or `search_nodes` after modifications to confirm success.
+7. **Use high-level tools first**: Prefer `/skill/create-nodes`, `/skill/modify-nodes` over raw `editor_request` — they handle serialization and error recovery.
+8. **Fallback to `editor_request`**: For operations not covered by high-level tools (e.g., `focus-camera`, `duplicate-node`, asset-db queries), use the editor request gateway.
+9. **Gated actions**: Destructive operations (`delete_nodes`, `clear_scene`, etc.) require two-step approval. Always handle the token flow.
