@@ -153,6 +153,22 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    async linkNodeWithPrefabAsset(nodeUuid: string, assetUuid: string) {
+        try {
+            const cce = (globalThis as any)['cce'];
+            
+            if (!cce || !cce.Prefab || !cce.Prefab.linkNodeWithPrefabAsset) {
+                throw new Error('CCE API not found');
+            }
+
+            await cce.Prefab.linkNodeWithPrefabAsset(nodeUuid, assetUuid);
+            return true;
+        } catch (error) {
+            console.error('Error linking node with prefab asset:', error);
+            return false;
+        }
+    },
+
     async unlinkPrefabByNode(nodeUuid: string, recursive: boolean) {
         try {
             const cce = (globalThis as any)['cce'];

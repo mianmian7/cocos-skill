@@ -60,7 +60,7 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
                     let unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
                       name: packageJSON.name,
                       method: 'unlinkPrefabByNode',
-                      args: [nodeUuid, false]
+                      args: [decodedNodeUuid, false]
                     }) as boolean;
                     if (!unlinkResult) {
                       errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
@@ -82,7 +82,7 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
                     let unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
                       name: packageJSON.name,
                       method: 'unlinkPrefabByNode',
-                      args: [nodeUuid, false]
+                      args: [decodedNodeUuid, true]
                     }) as boolean;
                     if (!unlinkResult) {
                       errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
@@ -141,7 +141,7 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
                     await Editor.Message.request('scene', 'execute-scene-script', {
                       name: packageJSON.name,
                       method: 'applyPrefabByNode',
-                      args: [nodeUuid]
+                      args: [decodedNodeUuid]
                     }) as any;
 
                     operationResult = {

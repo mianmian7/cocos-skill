@@ -42,30 +42,53 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
             await openPrefabFromAsset(assetToOpenUrlOrUuid, errors, notes);
             break;
 
-          case 'save_and_close':
-            // Save current prefab if requested
+          case 'save_and_close': {
+            let prefabInfo: any = null;
+            try {
+              prefabInfo = await Editor.Message.request('scene', 'query-prefab-info');
+            } catch {
+              // ignore
+            }
+
+            if (!prefabInfo) {
+              notes.push('No prefab editing session is active; skipped save_and_close.');
+              break;
+            }
+
             try {
               await Editor.Message.request('scene', 'save-scene');
             } catch (saveError) {
               errors.push(`Error saving prefab before closing: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
             }
 
-            // Close current prefab
             try {
               await Editor.Message.request('scene', 'close-scene');
             } catch (closeError) {
               errors.push(`Error closing prefab: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
             }
             break;
+          }
 
-          case 'close_without_saving':
-            // Close current prefab
+          case 'close_without_saving': {
+            let prefabInfo: any = null;
+            try {
+              prefabInfo = await Editor.Message.request('scene', 'query-prefab-info');
+            } catch {
+              // ignore
+            }
+
+            if (!prefabInfo) {
+              notes.push('No prefab editing session is active; skipped close_without_saving.');
+              break;
+            }
+
             try {
               await Editor.Message.request('scene', 'close-scene');
             } catch (closeError) {
               errors.push(`Error closing prefab: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
             }
             break;
+          }
         }
 
         if (errors.length > 0) {
@@ -122,9 +145,13 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
         assetPath += '.prefab'; // Ensure it has .prefab extension
       }
 
-      // Create prefab from node
+      // Create prefab from node via scene script helper.
       try {
-        const result = await Editor.Message.request('scene', 'create-prefab', decodedNodeUuid, assetPath);
+        const result = await Editor.Message.request('scene', 'execute-scene-script', {
+          name: packageJSON.name,
+          method: 'createPrefabFromNode',
+          args: [decodedNodeUuid, assetPath],
+        });
         
         if (result && result.uuid) {
           prefabUuid = result.uuid;
@@ -246,6 +273,10 @@ export function registerOperatePrefabAssetsTool(server: ToolRegistrar): void {
       errors.push(`Error opening prefab: ${openError instanceof Error ? openError.message : String(openError)}`);
     }
 
-    notes.push(`Prefab ${prefabInfo.name} opened successfully (UUID: ${encodeUuid(prefabInfo.uuid)})`);
+    if (prefabOpened && prefabInfo?.uuid) {
+      notes.push(`Prefab ${prefabInfo.name} opened successfully (UUID: ${encodeUuid(prefabInfo.uuid)})`);
+    } else if (prefabOpened) {
+      notes.push('Prefab opened successfully.');
+    }
   };
 }

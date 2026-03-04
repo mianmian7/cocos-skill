@@ -56,10 +56,6 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
       return newlyLinkedNodes[0];
     }
 
-    if (newlyLinkedNodes.length > 1) {
-      return newlyLinkedNodes.includes(fallbackUuid) ? fallbackUuid : newlyLinkedNodes[0];
-    }
-
     try {
       const fallbackNodeInfo = await Editor.Message.request('scene', 'query-node', fallbackUuid);
       if (isLinkedToPrefabAsset(fallbackNodeInfo, assetUuid)) {
@@ -69,11 +65,7 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
       // Keep fallback behavior.
     }
 
-    if (linkedNodesAfterCreate.includes(fallbackUuid)) {
-      return fallbackUuid;
-    }
-
-    return linkedNodesAfterCreate[0] ?? fallbackUuid;
+    return fallbackUuid;
   };
 
   // Helper function to get root scene node
@@ -221,12 +213,26 @@ export function registerCreateNodesTool(server: ToolRegistrar): void {
               // Create prefab instance
               const result = await Editor.Message.request('scene', 'create-node', {
                 parent: targetParentUuid,
-                assetUuid: assetUuid
+                assetUuid: assetUuid,
+                unlinkPrefab: false
               });
               const fallbackUuid = extractCreatedNodeUuid(result);
               if (!fallbackUuid) {
                 errors.push(`Failed to create node of type ${nodeSpec.type}: create-node did not return UUID`);
                 continue;
+              }
+
+              try {
+                const linked = await Editor.Message.request('scene', 'execute-scene-script', {
+                  name: packageJSON.name,
+                  method: 'linkNodeWithPrefabAsset',
+                  args: [fallbackUuid, assetUuid],
+                });
+                if (!linked) {
+                  errors.push(`Created node ${nodeSpec.name} but failed to link prefab asset ${encodeUuid(assetUuid)}`);
+                }
+              } catch (linkError) {
+                errors.push(`Error linking prefab asset for node ${nodeSpec.name}: ${linkError instanceof Error ? linkError.message : String(linkError)}`);
               }
 
               nodeUuid = await resolvePrefabInstanceUuid(fallbackUuid, assetUuid, linkedNodesBeforeCreate);
