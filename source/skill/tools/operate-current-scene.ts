@@ -3,6 +3,7 @@ import { z } from "zod";
 import packageJSON from '../../../package.json';
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
 import { getComponentInfo, setProperties, PropertySetSpec } from "../tool-utils";
+import { saveSceneNonInteractive } from "./scene-save.js";
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -91,11 +92,13 @@ export function registerOperateCurrentSceneTool(server: ToolRegistrar): void {
           }
 
           case "save": {
-            await Editor.Message.request('scene', 'save-scene');
+            const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+              Editor.Message.request(channel, command, ...args)
+            );
             return {
               content: [{
                 type: "text",
-                text: JSON.stringify({ success: true })
+                text: JSON.stringify(saveResult)
               }]
             };
           }

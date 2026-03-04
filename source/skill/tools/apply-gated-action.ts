@@ -1,6 +1,7 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { saveSceneNonInteractive } from "./scene-save.js";
 
 /**
  * apply_gated_action - 敏感操作网关
@@ -124,13 +125,27 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
     }
 
     case 'save_scene': {
-      await Editor.Message.request('scene', 'save-scene');
-      return { saved: true };
+      const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+        Editor.Message.request(channel, command, ...args)
+      );
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Failed to save scene.');
+      }
+      return { saved: saveResult.saved, saveResult };
     }
 
     case 'save_all': {
-      await Editor.Message.request('asset-db', 'save-all');
-      return { savedAll: true };
+      const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
+        Editor.Message.request(channel, command, ...args)
+      );
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Failed to save all changes.');
+      }
+      return {
+        savedAll: true,
+        saveResult,
+        note: 'Saved current scene. Cocos Creator asset-db channel does not expose a documented save-all command.'
+      };
     }
 
     case 'execute_code': {
