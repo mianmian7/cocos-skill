@@ -81,6 +81,53 @@ function processTypeScriptTemplate(
   }
 }
 
+type AssetInfoLike = {
+  uuid?: string;
+};
+
+function resolveProjectAssetFsPath(assetPath: string): string | null {
+  const assetsUrlPrefix = 'db://assets';
+  if (!assetPath.startsWith(assetsUrlPrefix)) {
+    return null;
+  }
+
+  const projectPath = typeof Editor?.Project?.path === 'string' ? Editor.Project.path : null;
+  if (!projectPath) {
+    return null;
+  }
+
+  const relativeAssetPath = assetPath.slice(assetsUrlPrefix.length).replace(/^\/+/, '');
+  if (relativeAssetPath.length === 0) {
+    return path.join(projectPath, 'assets');
+  }
+
+  const normalizedRelativePath = relativeAssetPath.split('/').join(path.sep);
+  return path.join(projectPath, 'assets', normalizedRelativePath);
+}
+
+async function queryAssetInfoSafe(assetPath: string): Promise<AssetInfoLike | null> {
+  try {
+    const info = await Editor.Message.request('asset-db', 'query-asset-info', assetPath);
+    return info && typeof info === 'object' ? (info as AssetInfoLike) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function detectExistingAsset(assetPath: string): Promise<AssetInfoLike | null> {
+  const assetInfo = await queryAssetInfoSafe(assetPath);
+  if (assetInfo) {
+    return assetInfo;
+  }
+
+  const fsPath = resolveProjectAssetFsPath(assetPath);
+  if (fsPath && fs.existsSync(fsPath)) {
+    return {};
+  }
+
+  return null;
+}
+
 export function registerOperateAssetsTool(server: ToolRegistrar): void {
   const assetTemplateUrls: { [key: string] : { url: string, ext: string} } = {
     "Prefab": { url: "db://internal/default_file_content/prefab/default.prefab", ext: ".prefab" },
@@ -162,6 +209,19 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
 
                 // Ensure correct extension
                 const finalPath = destinationPath.replace(/\.[^.]*$/, '') + template.ext;
+                if (!overwrite && !rename) {
+                  const existingAsset = await detectExistingAsset(finalPath);
+                  if (existingAsset) {
+                    result = {
+                      operation: "create",
+                      path: finalPath,
+                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
+                      skipped: true,
+                      reason: "already_exists"
+                    };
+                    break;
+                  }
+                }
 
                 if (template.url && template.url.length > 0) {
                   // For TypeScript files, read template content and pre-process it
@@ -185,6 +245,21 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                             `${finalFileName}.ts` : 
                             `${path.dirname(finalPath)}/${finalFileName}.ts` 
                           : finalPath;
+                        if (!overwrite && !rename && actualPath !== finalPath) {
+                          const existingAdjustedAsset = await detectExistingAsset(actualPath);
+                          if (existingAdjustedAsset) {
+                            result = {
+                              operation: "create",
+                              path: actualPath,
+                              ...(existingAdjustedAsset.uuid ? { uuid: encodeUuid(existingAdjustedAsset.uuid) } : {}),
+                              skipped: true,
+                              reason: "already_exists",
+                              originalPath: finalPath,
+                              adjustedPath: actualPath
+                            };
+                            break;
+                          }
+                        }
                         
                         // Create asset with processed content
                         const createResult = await Editor.Message.request('asset-db', 'create-asset', actualPath, processedContent);
@@ -246,6 +321,20 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                   errors.push("originalAssetPath and destinationPath are required for copy operation");
                   continue;
                 }
+                if (!overwrite && !rename) {
+                  const existingAsset = await detectExistingAsset(destinationPath);
+                  if (existingAsset) {
+                    result = {
+                      operation: "copy",
+                      from: originalAssetPath,
+                      to: destinationPath,
+                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
+                      skipped: true,
+                      reason: "already_exists"
+                    };
+                    break;
+                  }
+                }
 
                 const copyResult = await Editor.Message.request('asset-db', 'copy-asset', originalAssetPath, destinationPath, { overwrite, rename });
                 if (copyResult) {
@@ -261,6 +350,20 @@ export function registerOperateAssetsTool(server: ToolRegistrar): void {
                 if (!originalAssetPath || !destinationPath) {
                   errors.push("originalAssetPath and destinationPath are required for move operation");
                   continue;
+                }
+                if (!overwrite && !rename) {
+                  const existingAsset = await detectExistingAsset(destinationPath);
+                  if (existingAsset) {
+                    result = {
+                      operation: "move",
+                      from: originalAssetPath,
+                      to: destinationPath,
+                      ...(existingAsset.uuid ? { uuid: encodeUuid(existingAsset.uuid) } : {}),
+                      skipped: true,
+                      reason: "already_exists"
+                    };
+                    break;
+                  }
                 }
 
                 const moveResult = await Editor.Message.request('asset-db', 'move-asset', originalAssetPath, destinationPath, { overwrite, rename });
