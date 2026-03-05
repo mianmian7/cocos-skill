@@ -17,80 +17,41 @@ import { CommandSchema, ALL_COMMANDS, getCommandSchema, getAvailableChannels } f
  * 处理参数中的 UUID 编解码
  * 支持：字符串参数、数组参数、对象参数中的各类 UUID 字段
  */
+const MAX_UUID_DECODE_DEPTH = 10;
+
+function tryDecodeUuid(value: string): string {
+  if (value.length <= 20) {
+    return value;
+  }
+  try {
+    return decodeUuid(value);
+  } catch {
+    return value;
+  }
+}
+
+function decodeUuidsDeep(value: unknown, depth = 0): unknown {
+  if (depth > MAX_UUID_DECODE_DEPTH) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return tryDecodeUuid(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => decodeUuidsDeep(item, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      result[key] = decodeUuidsDeep(entry, depth + 1);
+    }
+    return result;
+  }
+  return value;
+}
+
 function processArgs(args: any[]): any[] {
-  return args.map((arg) => {
-    // 字符串参数 - 尝试解码 UUID
-    if (typeof arg === "string" && arg.length > 20) {
-      try {
-        return decodeUuid(arg);
-      } catch {
-        return arg;
-      }
-    }
-
-    // 数组参数 - 递归处理每个元素（支持 UUID 数组）
-    if (Array.isArray(arg)) {
-      return arg.map((item) => {
-        if (typeof item === "string" && item.length > 20) {
-          try {
-            return decodeUuid(item);
-          } catch {
-            return item;
-          }
-        }
-        return item;
-      });
-    }
-
-    // 对象参数 - 处理各类 UUID 字段
-    if (typeof arg === "object" && arg !== null) {
-      const processed = { ...arg };
-
-      // 处理单个 UUID 字段
-      const uuidFields = ["uuid", "parent", "assetUuid", "nodeUuid", "target", "source"];
-      for (const key of uuidFields) {
-        if (typeof processed[key] === "string" && processed[key].length > 20) {
-          try {
-            processed[key] = decodeUuid(processed[key]);
-          } catch {
-            // 保持原值
-          }
-        }
-      }
-
-      // 处理 uuid 字段可能是数组的情况 (string | string[])
-      if (Array.isArray(processed.uuid)) {
-        processed.uuid = processed.uuid.map((u: string) => {
-          if (typeof u === "string" && u.length > 20) {
-            try {
-              return decodeUuid(u);
-            } catch {
-              return u;
-            }
-          }
-          return u;
-        });
-      }
-
-      // 处理 uuids 数组字段
-      if (Array.isArray(processed.uuids)) {
-        processed.uuids = processed.uuids.map((u: string) => {
-          if (typeof u === "string" && u.length > 20) {
-            try {
-              return decodeUuid(u);
-            } catch {
-              return u;
-            }
-          }
-          return u;
-        });
-      }
-
-      return processed;
-    }
-
-    return arg;
-  });
+  return args.map((arg) => decodeUuidsDeep(arg));
 }
 
 type SelectionExecutionResult = {

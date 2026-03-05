@@ -143,3 +143,49 @@ test('selection commands should fallback to getSelected/update when select is un
   ]);
   assert.equal(messageCalls.length, 0);
 });
+
+test('editor_request should decode nested asset uuids in set-property dump', async () => {
+  const rawAssetUuid = 'f772788e-54f9-4c36-aa61-a7e83d0b5eee@f9941';
+  const encodedAssetUuid = Buffer.from(rawAssetUuid, 'utf8').toString('base64');
+  const messageCalls: Array<{ channel: string; command: string; args: unknown[] }> = [];
+
+  (globalThis as any).Editor = {
+    Message: {
+      request: async (channel: string, command: string, ...args: unknown[]) => {
+        messageCalls.push({ channel, command, args });
+        return { ok: true };
+      },
+    },
+  };
+
+  const { registrar, getHandler } = createRegistrar();
+  registerEditorRequestTool(registrar);
+  const handler = getHandler();
+
+  const response = await handler({
+    channel: 'scene',
+    command: 'set-property',
+    encodeResultUuids: false,
+    args: [
+      {
+        uuid: 'f772788e-54f9-4c36-aa61-a7e83d0b5eee',
+        path: 'spriteFrame',
+        dump: {
+          type: 'cc.Asset',
+          value: {
+            uuid: encodedAssetUuid,
+          },
+        },
+      },
+    ],
+  });
+
+  const text = response.content[0]?.text;
+  assert.ok(text, 'tool should return text response');
+  const body = JSON.parse(text);
+
+  assert.equal(body.success, true);
+  assert.equal(messageCalls.length, 1);
+  const forwardedArg = messageCalls[0].args[0] as any;
+  assert.equal(forwardedArg.dump.value.uuid, rawAssetUuid);
+});
