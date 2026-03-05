@@ -1,6 +1,5 @@
-import { create } from 'domain';
-import { get } from 'http';
 import { join } from 'path';
+import { enrichExecutionError } from './arbitrary-code-error.js';
 module.paths.push(join(Editor.App.path, 'node_modules'));
 
 const MAX_LOGS = 500;
@@ -257,7 +256,7 @@ export const methods: Record<string, (...args: any[]) => any> = {
                 return result;
             } catch (error) {
                 if (timeoutId) clearTimeout(timeoutId);
-                throw error;
+                throw enrichExecutionError(error, code);
             }
             
         } catch (error) {
