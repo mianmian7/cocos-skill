@@ -14,6 +14,16 @@ export class ToolValidationError extends Error {
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
   private static readonly NUMBER_PATTERN = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i;
+  private static readonly ARG_WRAPPER_KEYS = [
+    'arguments',
+    'args',
+    'input',
+    'payload',
+    'body',
+    'parameters',
+    'params',
+  ] as const;
+  private static readonly MAX_ARGS_UNWRAP_DEPTH = 4;
 
   registerTool(
     name: string,
@@ -77,16 +87,85 @@ export class ToolRegistry {
     args: unknown,
     inputSchema: Record<string, z.ZodTypeAny>
   ): unknown {
-    if (!args || typeof args !== 'object' || Array.isArray(args)) {
-      return args;
+    const unwrappedArgs = this.unwrapArgsBySchema(args, inputSchema);
+    if (!this.isRecord(unwrappedArgs)) {
+      return unwrappedArgs;
     }
 
-    const normalizedArgs: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+    const normalizedArgs: Record<string, unknown> = { ...unwrappedArgs };
     for (const [fieldName, fieldSchema] of Object.entries(inputSchema)) {
       normalizedArgs[fieldName] = this.coerceValueForSchema(fieldSchema, normalizedArgs[fieldName]);
     }
 
     return normalizedArgs;
+  }
+
+  private unwrapArgsBySchema(
+    args: unknown,
+    inputSchema: Record<string, z.ZodTypeAny>
+  ): unknown {
+    const schemaKeys = Object.keys(inputSchema);
+    let currentArgs = this.tryParseJsonPayload(args);
+
+    for (let depth = 0; depth < ToolRegistry.MAX_ARGS_UNWRAP_DEPTH; depth++) {
+      if (!this.isRecord(currentArgs) || this.hasAnySchemaKey(currentArgs, schemaKeys)) {
+        return currentArgs;
+      }
+
+      const nextArgs = this.findWrappedArgs(currentArgs, schemaKeys);
+      if (nextArgs === undefined) {
+        return currentArgs;
+      }
+      currentArgs = nextArgs;
+    }
+
+    return currentArgs;
+  }
+
+  private findWrappedArgs(
+    payload: Record<string, unknown>,
+    schemaKeys: string[]
+  ): unknown {
+    for (const wrapperKey of ToolRegistry.ARG_WRAPPER_KEYS) {
+      if (!(wrapperKey in payload)) {
+        continue;
+      }
+      const candidate = this.tryParseJsonPayload(payload[wrapperKey]);
+      if (!this.isRecord(candidate)) {
+        continue;
+      }
+      if (this.hasAnySchemaKey(candidate, schemaKeys) || this.hasAnyWrapperKey(candidate)) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  private hasAnySchemaKey(payload: Record<string, unknown>, schemaKeys: string[]): boolean {
+    return schemaKeys.some((key) => key in payload);
+  }
+
+  private hasAnyWrapperKey(payload: Record<string, unknown>): boolean {
+    return ToolRegistry.ARG_WRAPPER_KEYS.some((key) => key in payload);
+  }
+
+  private tryParseJsonPayload(value: unknown): unknown {
+    if (typeof value !== 'string') {
+      return value;
+    }
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return value;
+    }
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private coerceValueForSchema(fieldSchema: z.ZodTypeAny, value: unknown): unknown {
