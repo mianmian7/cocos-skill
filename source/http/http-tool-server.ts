@@ -57,6 +57,77 @@ const ROUTE_TO_TOOL: Record<string, string> = {
     '/skill/apply-gated-action': 'apply_gated_action'
 };
 
+const TOOL_ARGS_WRAPPER_KEYS = new Set([
+    'arguments',
+    'args',
+    'input',
+    'payload',
+    'body',
+    'parameters',
+    'params',
+]);
+
+const TOOL_CALL_METADATA_KEYS = new Set([
+    'id',
+    'name',
+    'tool',
+    'toolName',
+    'method',
+    'jsonrpc',
+    'type',
+]);
+
+const MAX_ARGS_UNWRAP_DEPTH = 3;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function tryParseJsonPayload(value: unknown): unknown {
+    if (typeof value !== 'string') {
+        return value;
+    }
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        return value;
+    }
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return value;
+    }
+}
+
+function getArgsWrapperKey(payload: Record<string, unknown>): string | null {
+    const keys = Object.keys(payload);
+    for (const key of keys) {
+        if (!TOOL_ARGS_WRAPPER_KEYS.has(key)) {
+            continue;
+        }
+        const remainingKeys = keys.filter((entry) => entry !== key);
+        const metadataOnly = remainingKeys.every((entry) => TOOL_CALL_METADATA_KEYS.has(entry));
+        if (remainingKeys.length === 0 || metadataOnly) {
+            return key;
+        }
+    }
+    return null;
+}
+
+export function normalizeToolRequestArgs(payload: unknown): unknown {
+    let currentPayload = tryParseJsonPayload(payload);
+    for (let depth = 0; depth < MAX_ARGS_UNWRAP_DEPTH; depth++) {
+        if (!isRecord(currentPayload)) {
+            return currentPayload;
+        }
+        const wrapperKey = getArgsWrapperKey(currentPayload);
+        if (!wrapperKey) {
+            return currentPayload;
+        }
+        currentPayload = tryParseJsonPayload(currentPayload[wrapperKey]);
+    }
+    return currentPayload;
+}
+
 export class HttpToolServer {
     private static instance: HttpToolServer | null = null;
     private httpServer: HttpServer | null = null;
@@ -247,7 +318,8 @@ export class HttpToolServer {
 
             (this.expressApp as any)[method](route, async (req: Request, res: Response) => {
                 try {
-                    const args = method === 'get' ? req.query : req.body;
+                    const rawArgs = method === 'get' ? req.query : req.body;
+                    const args = method === 'get' ? rawArgs : normalizeToolRequestArgs(rawArgs);
                     const result = await this.toolRegistry.execute(toolName, args || {});
                     res.json(result);
                 } catch (error) {
@@ -276,7 +348,8 @@ export class HttpToolServer {
                     res.status(404).json({ error: `Tool not found: ${toolName}` });
                     return;
                 }
-                const result = await this.toolRegistry.execute(toolName, req.body || {});
+                const args = normalizeToolRequestArgs(req.body);
+                const result = await this.toolRegistry.execute(toolName, args || {});
                 res.json(result);
             } catch (error) {
                 console.error(`Error executing ${toolName}:`, error);
