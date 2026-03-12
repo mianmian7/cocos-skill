@@ -17,6 +17,8 @@ import { registerModifyNodesTool } from '../skill/tools/modify-nodes.js';
 import { registerQueryNodesTool } from '../skill/tools/query-nodes.js';
 import { registerQueryComponentsTool } from '../skill/tools/query-components.js';
 import { registerModifyComponentsTool } from '../skill/tools/modify-components.js';
+import { registerGetComponentDefinitionsTool } from '../skill/tools/get-component-definitions.js';
+import { registerGetNodeDefinitionsTool } from '../skill/tools/get-node-definitions.js';
 import { registerNodeLinkedPrefabsOperationsTool } from '../skill/tools/node-linked-prefabs-operations.js';
 import { registerGetAvailableComponentTypesTool } from '../skill/tools/get-available-component-types.js';
 import { registerGetAvailableAssetTypesTool } from '../skill/tools/get-available-asset-types.js';
@@ -43,6 +45,8 @@ const ROUTE_TO_TOOL: Record<string, string> = {
     '/skill/modify-nodes': 'modify_nodes',
     '/skill/query-components': 'query_components',
     '/skill/modify-components': 'modify_components',
+    '/skill/definitions/components': 'get_component_definitions',
+    '/skill/definitions/nodes': 'get_node_definitions',
     '/skill/current-scene': 'operate_current_scene',
     '/skill/assets': 'operate_assets',
     '/skill/prefab-assets': 'operate_prefab_assets',
@@ -184,6 +188,10 @@ export class HttpToolServer {
         if (this.config.tools.modifyComponents) {
             registerModifyComponentsTool(registry);
         }
+
+        // Definitions (schema/type hints)
+        registerGetComponentDefinitionsTool(registry);
+        registerGetNodeDefinitionsTool(registry);
 
         // Scene and asset tools
         if (this.config.tools.operateCurrentScene) {
