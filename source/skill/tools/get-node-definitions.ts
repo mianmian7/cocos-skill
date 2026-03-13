@@ -14,7 +14,7 @@ export function registerGetNodeDefinitionsTool(server: ToolRegistrar): void {
       inputSchema: {
         nodeUuids: z.array(z.string()).describe("Array of node UUIDs"),
         includeTooltips: z.boolean().default(false).describe("Include tooltip keys when present in dump"),
-        hideInternalProps: z.boolean().default(true).describe("Filter out internal/private properties"),
+        hideInternalProps: z.boolean().default(true).describe("Filter out internal/private properties. If false, include underscore-prefixed paths like __comps__/__children__ for troubleshooting."),
         includeTs: z.boolean().default(false).describe("Include TypeScript fragments (path union + type map)"),
       },
     },

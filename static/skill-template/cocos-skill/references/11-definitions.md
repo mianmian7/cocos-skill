@@ -49,5 +49,7 @@ Request:
 ```
 
 Notes:
-- 节点 dump 来自 `scene.query-node`，可能包含大量内部字段，建议 `hideInternalProps=true`。
+- 节点 dump 来自 `scene.query-node`。
+- `hideInternalProps=true`（默认）会过滤掉 `_`/`__` 等内部字段，输出更干净。
+- `hideInternalProps=false` 可用于排查/高级用法，会包含如 `__comps__.*`、`__children__.*` 等路径（数据量会明显增大）。
 - TS 片段用于提示词/代码模式输入，帮助 LLM 使用正确的 property path 与 type。

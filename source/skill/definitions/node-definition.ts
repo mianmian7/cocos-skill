@@ -15,18 +15,35 @@ function shouldHideInternal(path: string): boolean {
   );
 }
 
+type FlattenOptions = {
+  skipUnderscoreKeys: boolean;
+  maxArrayLength: number;
+};
+
 function flattenDumpProperties(
   dump: any,
   basePath = "",
-  out: NodePropertyDefinition[] = []
+  out: NodePropertyDefinition[] = [],
+  options: FlattenOptions
 ): NodePropertyDefinition[] {
   if (!dump || typeof dump !== "object") return out;
 
+  // Array: traverse each element with numeric path suffix
+  if (Array.isArray(dump)) {
+    const maxLen = Math.min(dump.length, options.maxArrayLength);
+    for (let i = 0; i < maxLen; i++) {
+      flattenDumpProperties(dump[i], basePath ? `${basePath}.${i}` : String(i), out, options);
+    }
+    return out;
+  }
+
   for (const key of Object.keys(dump)) {
-    if (key.startsWith("_")) continue;
+    if (options.skipUnderscoreKeys && key.startsWith("_")) {
+      continue;
+    }
 
     const currentPath = basePath ? `${basePath}.${key}` : key;
-    const value = dump[key];
+    const value = (dump as any)[key];
 
     // Cocos dump leaf: { type, value, tooltip?, enumList?, isArray? }
     if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value")) {
@@ -40,15 +57,15 @@ function flattenDumpProperties(
         !["String", "Number", "Boolean", "cc.ValueType", "cc.Object"].includes(type);
 
       if (isComplex) {
-        flattenDumpProperties(value.value, currentPath, out);
+        flattenDumpProperties(value.value, currentPath, out, options);
       } else {
         out.push({ path: currentPath, type, tooltip, enumValues });
       }
       continue;
     }
 
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      flattenDumpProperties(value, currentPath, out);
+    if (value && typeof value === "object") {
+      flattenDumpProperties(value, currentPath, out, options);
     }
   }
 
@@ -60,11 +77,17 @@ export function extractNodePropertyDefinitions(
   options: {
     includeTooltips: boolean;
     hideInternalProps: boolean;
+    maxArrayLength?: number;
   }
 ): NodePropertyDefinition[] {
-  const { includeTooltips, hideInternalProps } = options;
+  const { includeTooltips, hideInternalProps, maxArrayLength } = options;
 
-  let defs = flattenDumpProperties(dump);
+  let defs = flattenDumpProperties(dump, "", [], {
+    // IMPORTANT: only skip underscore-prefixed keys when hideInternalProps=true.
+    // When hideInternalProps=false, callers may explicitly want __comps__/__children__ paths.
+    skipUnderscoreKeys: hideInternalProps,
+    maxArrayLength: typeof maxArrayLength === "number" ? maxArrayLength : 50,
+  });
 
   if (hideInternalProps) {
     defs = defs.filter((d) => !shouldHideInternal(d.path));
