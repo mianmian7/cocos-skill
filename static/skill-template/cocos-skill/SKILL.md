@@ -67,8 +67,10 @@ All endpoints below assume `http://127.0.0.1:{port}`.
 | POST | `/skill/query-nodes` | `query_nodes` | Query node details by UUID |
 | POST | `/skill/create-nodes` | `create_nodes` | Create new nodes in the scene |
 | POST | `/skill/modify-nodes` | `modify_nodes` | Modify node properties, components, parent |
+| POST | `/skill/definitions/nodes` | `get_node_definitions` | Get node property definitions (path->type) and optional TS fragments |
 | POST | `/skill/query-components` | `query_components` | Query component details |
 | POST | `/skill/modify-components` | `modify_components` | Modify component properties |
+| POST | `/skill/definitions/components` | `get_component_definitions` | Get component property definitions (path->type) and optional TS fragments |
 | POST | `/skill/current-scene` | `operate_current_scene` | Scene operations (open, save, close) |
 | POST | `/skill/assets` | `operate_assets` | Asset CRUD operations |
 | POST | `/skill/prefab-assets` | `operate_prefab_assets` | Prefab asset operations |
@@ -264,6 +266,7 @@ For exact parameter signatures, return types, and usage examples, read the corre
 | Execute scene scripts & component methods | `references/08-script-execution.md` |
 | Gizmo tools, viewport & 2D/3D toggle | `references/09-viewport-gizmo.md` |
 | Selection operations & project settings | `references/10-selection-and-project.md` |
+| Definitions (schema/type hints) | `references/11-definitions.md` |
 
 ### 6. Gated Actions — Two-Step Destructive Operations
 
@@ -316,6 +319,11 @@ Component properties use `__comps__.{index}.{property}` path format, where index
 ## Tips
 
 1. **Always start with `/skill/context`** to understand the current editor state before making changes. Prefer `POST`; `GET` is compatible.
+2. **Discover then Act**: Before calling `modify_nodes` / `modify_components`, call definitions first:
+   - `/skill/definitions/nodes` (`get_node_definitions`)
+   - `/skill/definitions/components` (`get_component_definitions`)
+   Use the returned property `path` + `type` to avoid guessing/hallucination.
+
 2. **Port discovery**: Read `${projectRoot}/.cocos-skill-config.json` and use `baseUrl` (or `port`) before any API call.
 3. **Asset operations must preflight-query first**: Before `create/copy/move`, always query destination with `asset-db.query-asset-info` (or `/skill/editor-request`) and decide explicitly: `skip` when exists and neither `overwrite` nor `rename` is set. For `copy/move`, also query source and fail fast if source is missing.
 4. **Large scenes (3000+ nodes)**: Use `summaryOnly=true` with `get_editor_context`, then `search_nodes` to find specific nodes.
