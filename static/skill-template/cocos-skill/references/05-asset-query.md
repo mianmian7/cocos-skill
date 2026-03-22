@@ -303,14 +303,14 @@ const uuid = await editor_request({
 const deps = await editor_request({
   channel: "asset-db",
   command: "query-asset-dependencies",
-  args: [uuid.result, "all"]
+  args: [uuid.data.result, "all"]
 });
 
 // 3. 查询哪些资源引用了这个 prefab
 const users = await editor_request({
   channel: "asset-db",
   command: "query-asset-users",
-  args: [uuid.result, "asset"]
+  args: [uuid.data.result, "asset"]
 });
 ```
 

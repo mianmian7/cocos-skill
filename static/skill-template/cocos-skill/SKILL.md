@@ -54,8 +54,8 @@ All endpoints below assume `http://127.0.0.1:{port}`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/skill/health` | Health check — returns `{ status, port, tools, version }` |
-| GET | `/skill/tools` | List all available tools |
+| GET | `/skill/health` | Health check — returns the standard envelope with `data.status`, `data.port`, `data.tools`, `data.version` |
+| GET | `/skill/tools` | List all available tools in the standard envelope under `data.tools` |
 | POST | `/skill/tool/:toolName` | Generic tool endpoint — call any tool by name |
 
 ### Tool Endpoints
@@ -277,7 +277,25 @@ Dangerous operations require a two-step approval flow:
 POST /skill/apply-gated-action
 { "action": "delete_nodes", "params": { "uuids": ["node-uuid-1"] } }
 ```
-Response: `{ "approvalToken": "abc123", "riskLevel": "high", "summary": "..." }`
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "requiresApproval": true,
+    "approvalToken": "abc123",
+    "riskLevel": "high",
+    "summary": "..."
+  },
+  "errors": [],
+  "warnings": [],
+  "logs": [],
+  "meta": {
+    "tool": "apply_gated_action",
+    "operation": "approval-preview"
+  }
+}
+```
 
 **Step 2 — Execute with token:**
 ```http

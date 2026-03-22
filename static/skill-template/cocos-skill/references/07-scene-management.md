@@ -43,7 +43,7 @@ const sceneInfo = await editor_request({
 editor_request({
   channel: "scene",
   command: "open-scene",
-  args: [sceneInfo.result]
+  args: [sceneInfo.data.result]
 })
 ```
 
@@ -191,7 +191,7 @@ const dirty = await editor_request({
 });
 
 // 2. 如有修改先保存
-if (dirty.result) {
+if (dirty.data.result) {
   await editor_request({
     channel: "scene",
     command: "save-scene",
@@ -210,7 +210,7 @@ const targetScene = await editor_request({
 await editor_request({
   channel: "scene",
   command: "open-scene",
-  args: [targetScene.result]
+  args: [targetScene.data.result]
 });
 ```
 

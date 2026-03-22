@@ -256,7 +256,7 @@ const child = await editor_request({
   command: "create-node",
   args: [{
     name: "Enemy01",
-    parent: parent.result,
+    parent: parent.data.result,
     position: { x: 100, y: 0, z: 0 }
   }]
 });

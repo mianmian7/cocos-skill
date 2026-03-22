@@ -121,7 +121,7 @@ const meta = await editor_request({
 });
 
 // 2. 修改 meta 并保存
-const updatedMeta = { ...meta.result, /* 修改的字段 */ };
+const updatedMeta = { ...meta.data.result, /* 修改的字段 */ };
 await editor_request({
   channel: "asset-db",
   command: "save-asset-meta",
@@ -329,7 +329,7 @@ const info = await editor_request({
   args: ["db://assets/configs/settings.json"]
 });
 
-if (info.result) {
+if (info.data.result) {
   // 存在则保存
   await editor_request({
     channel: "asset-db",

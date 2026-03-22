@@ -203,7 +203,7 @@ const nodeUuids = await editor_request({
 });
 
 // 2. 逐个查询详情
-for (const uuid of nodeUuids.result) {
+for (const uuid of nodeUuids.data.result) {
   const detail = await editor_request({
     channel: "scene",
     command: "query-node",
@@ -220,7 +220,7 @@ const dirty = await editor_request({
   command: "query-dirty",
   args: []
 });
-if (dirty.result) {
+if (dirty.data.result) {
   // 场景有未保存更改，提示用户或自动保存
 }
 ```

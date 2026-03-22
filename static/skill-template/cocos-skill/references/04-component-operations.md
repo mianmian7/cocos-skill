@@ -193,7 +193,7 @@ const result = await editor_request({
   command: "create-node",
   args: [{ name: "Player", parent: "scene-root-uuid" }]
 });
-const nodeUuid = result.result;
+const nodeUuid = result.data.result;
 
 // 2. 添加 Sprite 组件
 await editor_request({

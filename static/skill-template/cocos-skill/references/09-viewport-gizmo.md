@@ -319,8 +319,8 @@ const is2D = await editor_request({
 // ... 执行操作 ...
 
 // 恢复状态
-await editor_request({ channel: "scene", command: "change-gizmo-tool", args: [tool.result] });
-await editor_request({ channel: "scene", command: "change-gizmo-pivot", args: [pivot.result] });
-await editor_request({ channel: "scene", command: "change-gizmo-coordinate", args: [coord.result] });
-await editor_request({ channel: "scene", command: "change-is2D", args: [is2D.result] });
+await editor_request({ channel: "scene", command: "change-gizmo-tool", args: [tool.data.result] });
+await editor_request({ channel: "scene", command: "change-gizmo-pivot", args: [pivot.data.result] });
+await editor_request({ channel: "scene", command: "change-gizmo-coordinate", args: [coord.data.result] });
+await editor_request({ channel: "scene", command: "change-is2D", args: [is2D.data.result] });
 ```
