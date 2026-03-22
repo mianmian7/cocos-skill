@@ -1,168 +1,69 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
-import { decodeUuid, encodeUuid } from "../uuid-codec.js";
-import { CommandSchema, ALL_COMMANDS, getCommandSchema, getAvailableChannels } from "./editor-request-schemas";
+import packageJSON from "../../../package.json";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
+import { ALL_COMMANDS, getCommandSchema, getAvailableChannels } from "./editor-request-schemas";
+import {
+  encodeUuidsInResult,
+  executeSelectionCommand,
+  limitNodeTree,
+  processArgs,
+  simplifyNodeInfo,
+} from "./editor-request-support.js";
+import {
+  buildEditorRequestSuccessData,
+  buildOversizedEditorRequestOutcome,
+  executeEditorRequest,
+  getEditorRequestEffect,
+} from "./editor-request-runtime.js";
 
-/**
- * editor_request - 通用编辑器消息网关
- *
- * 提供对 Editor.Message.request API 的受控访问。
- * 通过 allowlist 控制哪些 channel + command 组合可以调用。
- *
- * 这是 "脚本化" 模型的核心工具，让 AI 可以组合调用编辑器 API，
- * 而不需要为每个 API 创建单独的工具接口。
- */
-
-/**
- * 处理参数中的 UUID 编解码
- * 支持：字符串参数、数组参数、对象参数中的各类 UUID 字段
- */
-const MAX_UUID_DECODE_DEPTH = 10;
-
-function tryDecodeUuid(value: string): string {
-  if (value.length <= 20) {
-    return value;
-  }
-  try {
-    return decodeUuid(value);
-  } catch {
-    return value;
-  }
-}
-
-function decodeUuidsDeep(value: unknown, depth = 0): unknown {
-  if (depth > MAX_UUID_DECODE_DEPTH) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return tryDecodeUuid(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => decodeUuidsDeep(item, depth + 1));
-  }
-  if (typeof value === "object" && value !== null) {
-    const result: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      result[key] = decodeUuidsDeep(entry, depth + 1);
-    }
-    return result;
-  }
-  return value;
-}
-
-function processArgs(args: any[]): any[] {
-  return args.map((arg) => decodeUuidsDeep(arg));
-}
-
-type SelectionExecutionResult = {
-  handled: boolean;
-  result?: unknown;
+type EditorRequestParams = {
+  channel?: string;
+  command?: string;
+  args?: unknown[];
+  listCommands?: boolean;
+  encodeResultUuids?: boolean;
+  maxResultSize?: number;
+  summarize?: boolean;
+  maxDepth?: number;
+  maxNodes?: number;
 };
 
-function toUuidList(value: unknown): string[] {
-  if (typeof value === "string") {
-    return [value];
+function buildListCommandsData() {
+  const commandsByChannel: Record<
+    string,
+    Array<{
+      command: string;
+      mode: string;
+      description: string;
+      args?: string;
+      officialType?: string;
+      returnType?: string;
+    }>
+  > = {};
+
+  for (const command of ALL_COMMANDS) {
+    if (!commandsByChannel[command.channel]) {
+      commandsByChannel[command.channel] = [];
+    }
+
+    commandsByChannel[command.channel].push({
+      command: command.command,
+      mode: command.mode,
+      description: command.description,
+      ...(command.argsSchema ? { args: command.argsSchema } : {}),
+      ...(command.officialType ? { officialType: command.officialType } : {}),
+      ...(command.returnType ? { returnType: command.returnType } : {}),
+    });
   }
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string");
-  }
-  return [];
+
+  return {
+    availableCommands: commandsByChannel,
+    totalCount: ALL_COMMANDS.length,
+    channels: getAvailableChannels(),
+  };
 }
 
-function getSelectionSnapshot(selectionApi: any, type: string): string[] | null {
-  if (typeof selectionApi?.getSelected !== "function") {
-    return null;
-  }
-  try {
-    return toUuidList(selectionApi.getSelected(type));
-  } catch {
-    return null;
-  }
-}
-
-function updateSelection(selectionApi: any, type: string, uuids: string[]): boolean {
-  if (typeof selectionApi?.update !== "function") {
-    return false;
-  }
-  selectionApi.update(type, uuids);
-  return true;
-}
-
-function executeSelectionCommand(command: string, args: any[]): SelectionExecutionResult {
-  const selectionApi = (Editor as any)?.Selection;
-  const selectionApiType = typeof selectionApi;
-  if (!selectionApi || (selectionApiType !== "object" && selectionApiType !== "function")) {
-    return { handled: false };
-  }
-
-  if (command === "select" || command === "unselect") {
-    const [type, uuidsRaw] = args;
-    if (typeof type !== "string") {
-      throw new Error(`selection:${command} requires first arg 'type' as string`);
-    }
-    const uuids = toUuidList(uuidsRaw);
-    if (uuids.length === 0) {
-      throw new Error(`selection:${command} requires second arg 'uuids' as string[] or string`);
-    }
-    const fn = selectionApi[command];
-    if (typeof fn === "function") {
-      fn.call(selectionApi, type, uuids);
-      return {
-        handled: true,
-        result: {
-          type,
-          uuids,
-          count: uuids.length,
-        },
-      };
-    }
-
-    const currentSelection = getSelectionSnapshot(selectionApi, type);
-    if (currentSelection && updateSelection(selectionApi, type, command === "select"
-      ? Array.from(new Set([...currentSelection, ...uuids]))
-      : currentSelection.filter((uuid) => !uuids.includes(uuid))
-    )) {
-      return {
-        handled: true,
-        result: {
-          type,
-          uuids,
-          count: uuids.length,
-        },
-      };
-    }
-    return { handled: false };
-  }
-
-  if (command === "clear") {
-    const [type] = args;
-    if (typeof type !== "string") {
-      throw new Error("selection:clear requires first arg 'type' as string");
-    }
-    if (typeof selectionApi.clear === "function") {
-      selectionApi.clear(type);
-      return {
-        handled: true,
-        result: {
-          type,
-          cleared: true,
-        },
-      };
-    }
-    if (updateSelection(selectionApi, type, [])) {
-      return {
-        handled: true,
-        result: {
-          type,
-          cleared: true,
-        },
-      };
-    }
-    return { handled: false };
-  }
-
-  return { handled: false };
-}
 
 export function registerEditorRequestTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -201,7 +102,7 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         maxNodes: z.number().default(50).describe("query-node-tree 返回的最大节点数"),
       },
     },
-    async (params) => {
+    async (params: EditorRequestParams) => {
       const {
         channel,
         command,
@@ -214,370 +115,103 @@ export function registerEditorRequestTool(server: ToolRegistrar): void {
         maxNodes = 50,
       } = params;
 
-      // 列出可用命令
-      if (listCommands) {
-        const commandsByChannel: Record<
-          string,
-          {
-            command: string;
-            mode: string;
-            description: string;
-            args?: string;
-            officialType?: string;
-            returnType?: string;
-          }[]
-        > = {};
-
-        for (const cmd of ALL_COMMANDS) {
-          if (!commandsByChannel[cmd.channel]) {
-            commandsByChannel[cmd.channel] = [];
-          }
-          commandsByChannel[cmd.channel].push({
-            command: cmd.command,
-            mode: cmd.mode,
-            description: cmd.description,
-            ...(cmd.argsSchema ? { args: cmd.argsSchema } : {}),
-            ...(cmd.officialType ? { officialType: cmd.officialType } : {}),
-            ...(cmd.returnType ? { returnType: cmd.returnType } : {}),
-          });
-        }
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: true,
-                  availableCommands: commandsByChannel,
-                  totalCount: ALL_COMMANDS.length,
-                  channels: getAvailableChannels(),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
       const normalizedChannel = typeof channel === "string" ? channel.trim() : "";
       const normalizedCommand = typeof command === "string" ? command.trim() : "";
-      if (!normalizedChannel || !normalizedCommand) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  error: "channel and command are required when listCommands=false",
-                  hint: "Set listCommands=true to list all available commands",
-                  availableChannels: getAvailableChannels(),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // 检查是否在 allowlist 中
       const allowed = getCommandSchema(normalizedChannel, normalizedCommand);
-      if (!allowed) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  error: `Command '${normalizedChannel}:${normalizedCommand}' is not in the allowlist`,
-                  hint: "Set listCommands=true to see available commands",
-                  availableChannels: getAvailableChannels(),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-          isError: true,
-        };
-      }
+      const effect = listCommands ? "read" : getEditorRequestEffect(normalizedChannel, allowed?.mode);
+      const operation = listCommands
+        ? "list-commands"
+        : `${normalizedChannel || "unknown"}:${normalizedCommand || "unknown"}`;
 
-      try {
-        // 处理参数（UUID 解码等）
-        const processedArgs = processArgs(args);
+      return runToolWithContext(
+        {
+          toolName: "editor_request",
+          operation,
+          effect,
+          packageName: packageJSON.name,
+          captureSceneLogs: false,
+          meta: {},
+        },
+        async ({ request }) => {
+          if (listCommands) {
+            return {
+              data: buildListCommandsData(),
+            };
+          }
 
-        // 调用编辑器 API
-        let result: any;
-        const selectionResult = normalizedChannel === "selection"
-          ? executeSelectionCommand(normalizedCommand, processedArgs)
-          : { handled: false };
+          if (!normalizedChannel || !normalizedCommand) {
+            return {
+              success: false,
+              data: {
+                availableChannels: getAvailableChannels(),
+                hint: "Set listCommands=true to list all available commands",
+              },
+              errors: ["channel and command are required when listCommands=false"],
+            };
+          }
 
-        if (selectionResult.handled) {
-          result = selectionResult.result;
-        } else if (processedArgs.length === 0) {
-          result = await Editor.Message.request(normalizedChannel, normalizedCommand);
-        } else if (processedArgs.length === 1) {
-          result = await Editor.Message.request(normalizedChannel, normalizedCommand, processedArgs[0]);
-        } else {
-          result = await Editor.Message.request(normalizedChannel, normalizedCommand, ...processedArgs);
-        }
+          if (!allowed) {
+            return {
+              success: false,
+              data: {
+                availableChannels: getAvailableChannels(),
+                hint: "Set listCommands=true to see available commands",
+              },
+              errors: [`Command '${normalizedChannel}:${normalizedCommand}' is not in the allowlist`],
+            };
+          }
 
-        // 特殊处理：query-node-tree 限制深度和节点数
-        if (normalizedChannel === "scene" && normalizedCommand === "query-node-tree") {
-          result = limitNodeTree(result, maxDepth, maxNodes);
-        }
+          try {
+            const processedArgs = processArgs(args);
+            const selectionResult = normalizedChannel === "selection"
+              ? executeSelectionCommand(normalizedCommand, processedArgs)
+              : { handled: false };
 
-        // 特殊处理：query-node 精简输出
-        if (normalizedChannel === "scene" && normalizedCommand === "query-node") {
-          result = simplifyNodeInfo(result, summarize);
-        }
+            let result = selectionResult.handled
+              ? selectionResult.result
+              : await executeEditorRequest(request, normalizedChannel, normalizedCommand, processedArgs);
 
-        // 处理结果（可选 UUID 编码）
-        if (encodeResultUuids && result) {
-          result = encodeUuidsInResult(result);
-        }
+            if (normalizedChannel === "scene" && normalizedCommand === "query-node-tree") {
+              result = limitNodeTree(result, maxDepth, maxNodes);
+            }
 
-        // 检查结果大小
-        let outputText = JSON.stringify(
-          {
-            success: true,
-            channel: normalizedChannel,
-            command: normalizedCommand,
-            mode: allowed.mode,
-            result,
-          },
-          null,
-          2
-        );
+            if (normalizedChannel === "scene" && normalizedCommand === "query-node") {
+              result = simplifyNodeInfo(result, summarize);
+            }
 
-        // 如果超出大小限制
-        if (outputText.length > maxResultSize) {
-          if (summarize) {
-            // 返回摘要
-            const summary = generateResultSummary(result, normalizedChannel, normalizedCommand);
-            outputText = JSON.stringify(
-              {
-                success: true,
+            if (encodeResultUuids && result) {
+              result = encodeUuidsInResult(result);
+            }
+
+            const data = buildEditorRequestSuccessData(normalizedChannel, normalizedCommand, allowed.mode, result);
+            const serialized = JSON.stringify(data);
+            if (serialized.length > maxResultSize) {
+              return buildOversizedEditorRequestOutcome({
                 channel: normalizedChannel,
                 command: normalizedCommand,
                 mode: allowed.mode,
-                truncated: true,
-                originalSize: outputText.length,
-                summary,
-                hint: "结果过大已生成摘要。使用更具体的查询或增加 maxResultSize 参数获取完整数据。",
+                result,
+                originalSize: serialized.length,
+                maxResultSize,
+                summarize,
+                operation,
+                effect,
+              });
+            }
+
+            return { data };
+          } catch (error) {
+            return {
+              success: false,
+              data: {
+                channel: normalizedChannel,
+                command: normalizedCommand,
               },
-              null,
-              2
-            );
-          } else {
-            // 截断
-            outputText = outputText.substring(0, maxResultSize) + "\n... [TRUNCATED]";
+              errors: [error instanceof Error ? error.message : String(error)],
+            };
           }
         }
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: outputText,
-            },
-          ],
-        };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  channel: normalizedChannel,
-                  command: normalizedCommand,
-                  error: error.message || String(error),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-          isError: true,
-        };
-      }
+      );
     }
   );
-}
-
-// 递归编码结果中的 UUID
-function encodeUuidsInResult(obj: any, depth = 0): any {
-  if (depth > 10) return obj; // 防止无限递归
-
-  if (typeof obj === "string" && isLikelyUuid(obj)) {
-    try {
-      return encodeUuid(obj);
-    } catch {
-      return obj;
-    }
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map((item) => encodeUuidsInResult(item, depth + 1));
-  }
-
-  if (typeof obj === "object" && obj !== null) {
-    const encoded: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-      encoded[key] = encodeUuidsInResult(value, depth + 1);
-    }
-    return encoded;
-  }
-
-  return obj;
-}
-
-function isLikelyUuid(str: string): boolean {
-  // Cocos UUID 格式：包含连字符的长字符串
-  return str.length > 30 && str.includes("-");
-}
-
-// 限制节点树的深度和节点数
-function limitNodeTree(tree: any, maxDepth: number, maxNodes: number): any {
-  let nodeCount = 0;
-
-  function processNode(node: any, depth: number): any {
-    if (nodeCount >= maxNodes) return null;
-    nodeCount++;
-
-    const limited: any = {
-      uuid: node.uuid,
-      name: node.name,
-      childCount: node.children?.length || 0,
-    };
-
-    if (depth < maxDepth && node.children && node.children.length > 0) {
-      limited.children = [];
-      for (const child of node.children) {
-        if (nodeCount >= maxNodes) {
-          limited.childrenTruncated = true;
-          break;
-        }
-        const processedChild = processNode(child, depth + 1);
-        if (processedChild) {
-          limited.children.push(processedChild);
-        }
-      }
-    } else if (node.children && node.children.length > 0) {
-      limited.hasChildren = true;
-      limited.childrenOmitted = node.children.length;
-    }
-
-    return limited;
-  }
-
-  if (Array.isArray(tree)) {
-    const result = [];
-    for (const root of tree) {
-      if (nodeCount >= maxNodes) break;
-      const processed = processNode(root, 0);
-      if (processed) result.push(processed);
-    }
-    return { nodes: result, totalProcessed: nodeCount, maxDepth, maxNodes };
-  } else if (tree && tree.children) {
-    const result = [];
-    for (const root of tree.children) {
-      if (nodeCount >= maxNodes) break;
-      const processed = processNode(root, 0);
-      if (processed) result.push(processed);
-    }
-    return { nodes: result, totalProcessed: nodeCount, maxDepth, maxNodes };
-  }
-
-  return tree;
-}
-
-// 精简节点信息，移除冗余数据
-function simplifyNodeInfo(node: any, summarize: boolean): any {
-  if (!node || !summarize) return node;
-
-  const simplified: any = {
-    uuid: node.uuid,
-    name: node.name?.value || node.name,
-    active: node.active?.value ?? true,
-    position: node.position?.value,
-    rotation: node.euler?.value || node.rotation?.value,
-    scale: node.scale?.value,
-    layer: node.layer?.value,
-  };
-
-  // 简化组件信息
-  if (node.__comps__ && Array.isArray(node.__comps__)) {
-    simplified.components = node.__comps__.map((comp: any) => ({
-      type: comp.type || comp.cid,
-      enabled: comp.enabled?.value ?? true,
-      // 只保留关键属性
-      ...(comp.color?.value ? { color: comp.color.value } : {}),
-      ...(comp.spriteFrame?.value ? { spriteFrame: comp.spriteFrame.value.uuid } : {}),
-    }));
-  }
-
-  // 子节点数量
-  if (node.__children__ || node.children) {
-    simplified.childCount = (node.__children__ || node.children).length;
-  }
-
-  return simplified;
-}
-
-// 生成结果摘要
-function generateResultSummary(result: any, channel: string, command: string): any {
-  if (channel === "scene" && command === "query-node-tree") {
-    const countNodes = (node: any): number => {
-      let count = 1;
-      if (node.children) {
-        for (const child of node.children) {
-          count += countNodes(child);
-        }
-      }
-      return count;
-    };
-
-    let totalNodes = 0;
-    const rootNames: string[] = [];
-    const nodes = Array.isArray(result) ? result : result?.children || [];
-    for (const root of nodes) {
-      totalNodes += countNodes(root);
-      rootNames.push(root.name);
-    }
-
-    return {
-      type: "node-tree-summary",
-      totalNodes,
-      rootNodes: rootNames.slice(0, 10),
-      hint: "使用 maxDepth 和 maxNodes 参数限制返回数据量",
-    };
-  }
-
-  if (channel === "scene" && command === "query-node") {
-    return {
-      type: "node-summary",
-      uuid: result?.uuid,
-      name: result?.name?.value || result?.name,
-      componentCount: result?.__comps__?.length || 0,
-      childCount: result?.__children__?.length || result?.children?.length || 0,
-      hint: "节点详情已精简，需要完整数据请设置 summarize=false",
-    };
-  }
-
-  // 默认摘要
-  return {
-    type: "generic-summary",
-    dataType: typeof result,
-    isArray: Array.isArray(result),
-    length: Array.isArray(result) ? result.length : undefined,
-    keys: typeof result === "object" && result ? Object.keys(result).slice(0, 20) : undefined,
-  };
 }
