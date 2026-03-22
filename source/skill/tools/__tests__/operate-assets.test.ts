@@ -120,6 +120,12 @@ function installEditorStub(options: EditorStubOptions): MessageCall[] {
   return calls;
 }
 
+function parseResponse(result: ToolResult): any {
+  const text = result.content[0]?.text;
+  assert.ok(text, 'tool should return text response');
+  return JSON.parse(text);
+}
+
 test('create folder should skip when destination already exists', async () => {
   const existingPath = 'db://assets/cocos-skill-test';
   const calls = installEditorStub({
@@ -144,12 +150,16 @@ test('create folder should skip when destination already exists', async () => {
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
 
-  assert.equal(Array.isArray(body.results), true);
-  assert.equal(body.results.length, 1);
-  assert.equal(body.results[0].operation, 'create');
-  assert.equal(body.results[0].path, existingPath);
-  assert.equal(body.results[0].skipped, true);
-  assert.equal(body.results[0].reason, 'already_exists');
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'create');
+  assert.deepEqual(body.errors, []);
+  assert.equal(Array.isArray(body.data?.results), true);
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].operation, 'create');
+  assert.equal(body.data.results[0].path, existingPath);
+  assert.equal(body.data.results[0].skipped, true);
+  assert.equal(body.data.results[0].reason, 'already_exists');
 
   const calledCreateLikeCommand = calls.some(
     (call) => call.channel === 'asset-db' && ['create-asset', 'copy-asset'].includes(call.command)
@@ -182,11 +192,15 @@ test('copy should skip when destination already exists', async () => {
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
 
-  assert.equal(body.results.length, 1);
-  assert.equal(body.results[0].operation, 'copy');
-  assert.equal(body.results[0].to, destinationPath);
-  assert.equal(body.results[0].skipped, true);
-  assert.equal(body.results[0].reason, 'already_exists');
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'copy');
+  assert.deepEqual(body.errors, []);
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].operation, 'copy');
+  assert.equal(body.data.results[0].to, destinationPath);
+  assert.equal(body.data.results[0].skipped, true);
+  assert.equal(body.data.results[0].reason, 'already_exists');
 
   const calledCopyAsset = calls.some(
     (call) => call.channel === 'asset-db' && call.command === 'copy-asset'
@@ -219,11 +233,15 @@ test('move should skip when destination already exists', async () => {
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
 
-  assert.equal(body.results.length, 1);
-  assert.equal(body.results[0].operation, 'move');
-  assert.equal(body.results[0].to, destinationPath);
-  assert.equal(body.results[0].skipped, true);
-  assert.equal(body.results[0].reason, 'already_exists');
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'move');
+  assert.deepEqual(body.errors, []);
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].operation, 'move');
+  assert.equal(body.data.results[0].to, destinationPath);
+  assert.equal(body.data.results[0].skipped, true);
+  assert.equal(body.data.results[0].reason, 'already_exists');
 
   const calledMoveAsset = calls.some(
     (call) => call.channel === 'asset-db' && call.command === 'move-asset'
@@ -252,10 +270,14 @@ test('create with overwrite should query first and pass overwrite option', async
   const text = result.content[0]?.text;
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
-  assert.equal(body.results.length, 1);
-  assert.equal(body.results[0].operation, 'create');
-  assert.equal(body.results[0].path, existingPath);
-  assert.equal(body.results[0].skipped ?? false, false);
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'create');
+  assert.deepEqual(body.errors, []);
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].operation, 'create');
+  assert.equal(body.data.results[0].path, existingPath);
+  assert.equal(body.data.results[0].skipped ?? false, false);
 
   const queryIndex = calls.findIndex(
     (call) =>
@@ -304,11 +326,15 @@ test('create folder should skip when filesystem path exists but asset-db misses 
     const text = result.content[0]?.text;
     assert.ok(text, 'tool should return text response');
     const body = JSON.parse(text);
-    assert.equal(body.results.length, 1);
-    assert.equal(body.results[0].operation, 'create');
-    assert.equal(body.results[0].path, destinationPath);
-    assert.equal(body.results[0].skipped, true);
-    assert.equal(body.results[0].reason, 'already_exists');
+    assert.equal(body.success, true);
+    assert.equal((body.meta as any)?.tool, 'operate_assets');
+    assert.equal((body.meta as any)?.operation, 'create');
+    assert.deepEqual(body.errors, []);
+    assert.equal(body.data.results.length, 1);
+    assert.equal(body.data.results[0].operation, 'create');
+    assert.equal(body.data.results[0].path, destinationPath);
+    assert.equal(body.data.results[0].skipped, true);
+    assert.equal(body.data.results[0].reason, 'already_exists');
 
     const calledCreateAsset = calls.some(
       (call) => call.channel === 'asset-db' && ['create-asset', 'copy-asset'].includes(call.command)
@@ -317,4 +343,86 @@ test('create folder should skip when filesystem path exists but asset-db misses 
   } finally {
     fs.rmSync(projectRoot, { recursive: true, force: true });
   }
+});
+
+test('create should report top-level failure when asset-db returns malformed mutation result', async () => {
+  (globalThis as any).Editor = {
+    Project: {
+      path: '',
+    },
+    Message: {
+      request: async (channel: string, command: string, ...args: unknown[]) => {
+        if (channel === 'asset-db' && command === 'query-asset-info') {
+          return null;
+        }
+        if (channel === 'asset-db' && command === 'create-asset') {
+          return null;
+        }
+        throw new Error(`unexpected command: ${channel}:${command}:${String(args[0] ?? '')}`);
+      },
+    },
+  };
+
+  const { registrar, getHandler } = createRegistrar();
+  registerOperateAssetsTool(registrar);
+  const body = parseResponse(
+    await getHandler()({
+      operation: 'create',
+      operationOptions: [
+        {
+          destinationPath: 'db://assets/broken-folder',
+          newAssetType: 'Folder',
+        },
+      ],
+    })
+  );
+
+  assert.equal(body.success, false);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'create');
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].success, false);
+});
+
+test('copy should report top-level failure when asset-db returns malformed mutation result', async () => {
+  (globalThis as any).Editor = {
+    Project: {
+      path: '',
+    },
+    Message: {
+      request: async (channel: string, command: string, ...args: unknown[]) => {
+        if (channel === 'asset-db' && command === 'query-asset-info') {
+          const queryPath = String(args[0]);
+          if (queryPath === 'db://assets/source.prefab') {
+            return { uuid: 'source-uuid', url: queryPath };
+          }
+          return null;
+        }
+        if (channel === 'asset-db' && command === 'copy-asset') {
+          return false;
+        }
+        throw new Error(`unexpected command: ${channel}:${command}`);
+      },
+    },
+  };
+
+  const { registrar, getHandler } = createRegistrar();
+  registerOperateAssetsTool(registrar);
+  const body = parseResponse(
+    await getHandler()({
+      operation: 'copy',
+      operationOptions: [
+        {
+          originalAssetPath: 'db://assets/source.prefab',
+          destinationPath: 'db://assets/copied.prefab',
+        },
+      ],
+    })
+  );
+
+  assert.equal(body.success, false);
+  assert.equal((body.meta as any)?.tool, 'operate_assets');
+  assert.equal((body.meta as any)?.operation, 'copy');
+  assert.equal(body.data.results.length, 1);
+  assert.equal(body.data.results[0].success, false);
 });
