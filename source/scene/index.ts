@@ -1,5 +1,6 @@
 import { join } from 'path';
 import { enrichExecutionError } from './arbitrary-code-error.js';
+import { operateAnimation } from './animation-ops';
 module.paths.push(join(Editor.App.path, 'node_modules'));
 
 const MAX_LOGS = 500;
@@ -263,5 +264,9 @@ export const methods: Record<string, (...args: any[]) => any> = {
             console.error('Error executing arbitrary code:', error);
             throw error;
         }
+    },
+
+    operateAnimation(request: any) {
+        return operateAnimation(request);
     }
 };

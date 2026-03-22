@@ -16,6 +16,7 @@ export interface SkillServerToolConfig {
   operateCurrentScene: boolean;
   operatePrefabAssets: boolean;
   operateAssets: boolean;
+  operateAnimation: boolean;
   nodeLinkedPrefabsOperations: boolean;
 
   // Discovery tools
@@ -59,6 +60,7 @@ export const DEFAULT_TOOL_CONFIG: SkillServerToolConfig = {
   operateCurrentScene: true,
   operatePrefabAssets: true,
   operateAssets: true,
+  operateAnimation: true,
   nodeLinkedPrefabsOperations: true,
 
   // Discovery tools (enabled by default)

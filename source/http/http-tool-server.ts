@@ -8,6 +8,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import { ToolRegistry, ToolValidationError, getToolRegistry } from './tool-registry.js';
+import { buildHttpErrorResponse, createHttpNotFoundResponse, createHttpSuccessEnvelope } from './http-response.js';
 import { ConfigStorage } from '../skill/config-storage.js';
 import { SkillServerConfig, DEFAULT_SERVER_CONFIG } from '../skill/config.js';
 
@@ -28,6 +29,7 @@ import { registerOperateCurrentSceneTool } from '../skill/tools/operate-current-
 import { registerOperateProjectSettingsTool } from '../skill/tools/operate-project-settings.js';
 import { registerOperatePrefabAssetsTool } from '../skill/tools/operate-prefab-assets.js';
 import { registerOperateScriptsAndTextTool } from '../skill/tools/operate-scripts-and-text.js';
+import { registerOperateAnimationTool } from '../skill/tools/operate-animation.js';
 import { registerExecuteSceneCodeTool } from '../skill/tools/execute-scene-code.js';
 import { registerGetEditorContextTool } from '../skill/tools/get-editor-context.js';
 import { registerEditorRequestTool } from '../skill/tools/editor-request.js';
@@ -50,6 +52,7 @@ const ROUTE_TO_TOOL: Record<string, string> = {
     '/skill/current-scene': 'operate_current_scene',
     '/skill/assets': 'operate_assets',
     '/skill/prefab-assets': 'operate_prefab_assets',
+    '/skill/animation': 'operate_animation',
     '/skill/node-prefab': 'node_linked_prefabs_operations',
     '/skill/discovery/components': 'get_available_component_types',
     '/skill/discovery/assets': 'get_available_asset_types',
@@ -203,6 +206,9 @@ export class HttpToolServer {
         if (this.config.tools.operateAssets) {
             registerOperateAssetsTool(registry);
         }
+        if (this.config.tools.operateAnimation) {
+            registerOperateAnimationTool(registry);
+        }
         if (this.config.tools.nodeLinkedPrefabsOperations) {
             registerNodeLinkedPrefabsOperationsTool(registry);
         }
@@ -236,45 +242,8 @@ export class HttpToolServer {
         console.log(`Registered ${this.toolRegistry.getToolNames().length} tools`);
     }
 
-    private buildErrorResponse(error: unknown, toolName?: string): { statusCode: number; body: Record<string, unknown> } {
-        const message = error instanceof Error ? error.message : String(error);
-        const addToolName = (body: Record<string, unknown>): Record<string, unknown> => {
-            return toolName ? { ...body, tool: toolName } : body;
-        };
-
-        if (error instanceof ToolValidationError) {
-            return {
-                statusCode: 422,
-                body: addToolName({
-                    error: message,
-                    type: 'validation_error',
-                    details: error.issues.map((issue) => ({
-                        path: issue.path.join('.'),
-                        code: issue.code,
-                        message: issue.message,
-                    })),
-                }),
-            };
-        }
-
-        if (message.startsWith('Validation error:')) {
-            return {
-                statusCode: 422,
-                body: addToolName({
-                    error: message,
-                    type: 'validation_error',
-                }),
-            };
-        }
-
-        return {
-            statusCode: 500,
-            body: addToolName({ error: message }),
-        };
-    }
-
     private respondWithToolError(res: Response, error: unknown, toolName?: string): void {
-        const { statusCode, body } = this.buildErrorResponse(error, toolName);
+        const { statusCode, body } = buildHttpErrorResponse(error, toolName);
         res.status(statusCode).json(body);
     }
 
@@ -300,12 +269,16 @@ export class HttpToolServer {
 
         // Health check
         this.expressApp.get('/skill/health', (_req: Request, res: Response) => {
-            res.json({
-                status: 'ok',
-                port: this.config.port,
-                tools: this.toolRegistry.getToolNames(),
-                version: this.config.version
-            });
+            res.json(createHttpSuccessEnvelope(
+                'http_health',
+                {
+                    status: 'ok',
+                    port: this.config.port,
+                    tools: this.toolRegistry.getToolNames(),
+                    version: this.config.version
+                },
+                { operation: 'health-check' }
+            ));
         });
 
         // List available tools
@@ -315,7 +288,11 @@ export class HttpToolServer {
                 title: t.title,
                 description: t.description
             }));
-            res.json({ tools });
+            res.json(createHttpSuccessEnvelope(
+                'http_tools',
+                { tools },
+                { operation: 'list-tools' }
+            ));
         });
 
         // Set up route-to-tool mappings
@@ -353,7 +330,8 @@ export class HttpToolServer {
             const { toolName } = req.params;
             try {
                 if (!this.toolRegistry.hasTool(toolName)) {
-                    res.status(404).json({ error: `Tool not found: ${toolName}` });
+                    const notFound = createHttpNotFoundResponse(toolName);
+                    res.status(notFound.statusCode).json(notFound.body);
                     return;
                 }
                 const args = normalizeToolRequestArgs(req.body);
