@@ -1,8 +1,58 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
+import packageJSON from "../../../package.json";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
 import { buildTsForNode } from "../definitions/ts-gen.js";
 import { extractNodePropertyDefinitions } from "../definitions/node-definition.js";
+
+type EditorRequest = (channel: string, command: string, ...args: unknown[]) => Promise<unknown>;
+
+async function buildNodeDefinitions(
+  request: EditorRequest,
+  args: {
+    nodeUuids: string[];
+    includeTooltips: boolean;
+    hideInternalProps: boolean;
+    includeTs: boolean;
+  }
+) {
+  const nodes: any[] = [];
+  const warnings: string[] = [];
+
+  for (const nodeUuidEncoded of args.nodeUuids) {
+    try {
+      const nodeUuid = decodeUuid(nodeUuidEncoded);
+      const dump = await request("scene", "query-node", nodeUuid);
+      if (!dump) {
+        warnings.push(`Node ${nodeUuidEncoded}: not found`);
+        continue;
+      }
+
+      const properties = extractNodePropertyDefinitions(dump, {
+        includeTooltips: args.includeTooltips,
+        hideInternalProps: args.hideInternalProps,
+      });
+
+      const definition: any = {
+        uuid: encodeUuid(nodeUuid),
+        properties,
+      };
+
+      if (args.includeTs) {
+        definition.ts = buildTsForNode({ uuid: definition.uuid, properties });
+      }
+
+      nodes.push(definition);
+    } catch (error) {
+      warnings.push(
+        `Error building definition for node ${nodeUuidEncoded}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  return { nodes, warnings };
+}
 
 export function registerGetNodeDefinitionsTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -18,55 +68,21 @@ export function registerGetNodeDefinitionsTool(server: ToolRegistrar): void {
         includeTs: z.boolean().default(false).describe("Include TypeScript fragments (path union + type map)"),
       },
     },
-    async (args) => {
-      const { nodeUuids, includeTooltips, hideInternalProps, includeTs } = args;
-
-      const nodes: any[] = [];
-      const errors: string[] = [];
-
-      for (const nodeUuidEncoded of nodeUuids) {
-        try {
-          const nodeUuid = decodeUuid(nodeUuidEncoded);
-          const dump = await Editor.Message.request("scene", "query-node", nodeUuid);
-          if (!dump) {
-            errors.push(`Node ${nodeUuidEncoded}: not found`);
-            continue;
-          }
-
-          const properties = extractNodePropertyDefinitions(dump, {
-            includeTooltips,
-            hideInternalProps,
-          });
-
-          const def: any = {
-            uuid: encodeUuid(nodeUuid),
-            properties,
+    async (args) =>
+      runToolWithContext(
+        {
+          toolName: "get_node_definitions",
+          operation: "get-node-definitions",
+          effect: "read",
+          packageName: packageJSON.name,
+        },
+        async ({ request }) => {
+          const result = await buildNodeDefinitions(request, args);
+          return {
+            data: { nodes: result.nodes },
+            warnings: result.warnings,
           };
-
-          if (includeTs) {
-            def.ts = buildTsForNode({ uuid: def.uuid, properties });
-          }
-
-          nodes.push(def);
-        } catch (e) {
-          errors.push(`Error building definition for node ${nodeUuidEncoded}: ${e instanceof Error ? e.message : String(e)}`);
         }
-      }
-
-      const result = {
-        operation: "get-node-definitions",
-        nodes,
-        errors: errors.length > 0 ? errors : undefined,
-      };
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result),
-          },
-        ],
-      };
-    }
+      )
   );
 }

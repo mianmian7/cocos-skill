@@ -2,6 +2,7 @@ import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 import { saveSceneNonInteractive } from "./scene-save.js";
 
 export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): void {
@@ -15,212 +16,101 @@ export function registerNodeLinkedPrefabsOperationsTool(server: ToolRegistrar): 
         operation: z.enum(["edit-prefab", "unwrap", "unwrap-completely", "locate", "reset", "update-prefab"])
       }
     },
-    async ({ nodeUuid, operation }) => {
-      await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'startCaptureSceneLogs', args: [] });
-      try {
-        const errors: string[] = [];
-        let operationResult: any = null;
-
-        try {
-          const decodedNodeUuid = decodeUuid(nodeUuid);
-
-          // Verify node exists
-          const nodeInfo = await Editor.Message.request('scene', 'query-node', decodedNodeUuid);
-          if (!nodeInfo) {
-            errors.push(`Node with UUID ${nodeUuid} not found`);
-          } else {
-            // Check if node is linked to a prefab
-            const nodeInfoAny = nodeInfo as any;
-            const prefabInfo = nodeInfoAny.__prefab__ || nodeInfoAny._prefab;
-            
-            if (!prefabInfo || !prefabInfo.uuid) {
-              errors.push(`Node ${nodeUuid} is not linked to a prefab`);
-            } else {
-              const prefabUuid = prefabInfo.uuid;
-              const encodedPrefabUuid = encodeUuid(prefabUuid);
-
-              switch (operation) {
-                case "edit-prefab": {
-                  try {
-                    const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
-                      Editor.Message.request(channel, command, ...args)
-                    );
-                    if (!saveResult.success) {
-                      errors.push(`Failed to save current scene before opening prefab: ${saveResult.error || "unknown error"}`);
-                      operationResult = {
-                        success: false,
-                        message: 'Save before context switch failed',
-                        prefabUuid: encodedPrefabUuid
-                      };
-                      break;
-                    }
-
-                    // Open prefab for editing
-                    await Editor.Message.request('asset-db', 'open-asset', prefabUuid);
-                    operationResult = {
-                      success: true,
-                      message: `Opened prefab for editing`,
-                      prefabUuid: encodedPrefabUuid
-                    };
-                  } catch (openError) {
-                    errors.push(`Failed to open prefab for editing: ${openError instanceof Error ? openError.message : String(openError)}`);
-                  }
-                  break;
-                }
-
-                case "unwrap": {
-                  try {
-                    // Use scene script to dump the node properly for prefab creation
-                    const unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
-                      name: packageJSON.name,
-                      method: 'unlinkPrefabByNode',
-                      args: [decodedNodeUuid, false]
-                    }) as boolean | null | undefined;
-                    const unlinkSucceeded = unlinkResult !== false;
-                    if (!unlinkSucceeded) {
-                      errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
-                    }
-                    operationResult = {
-                      success: unlinkSucceeded,
-                      message: `Node unlinked from prefab (single level)`,
-                      prefabUuid: encodedPrefabUuid
-                    };
-                  } catch (unlinkError) {
-                    errors.push(`Failed to unlink prefab: ${unlinkError instanceof Error ? unlinkError.message : String(unlinkError)}`);
-                  }
-                  break;
-                }
-
-                case "unwrap-completely": {
-                  try {
-                    // Use scene script to dump the node properly for prefab creation
-                    const unlinkResult = await Editor.Message.request('scene', 'execute-scene-script', {
-                      name: packageJSON.name,
-                      method: 'unlinkPrefabByNode',
-                      args: [decodedNodeUuid, true]
-                    }) as boolean | null | undefined;
-                    const unlinkSucceeded = unlinkResult !== false;
-                    if (!unlinkSucceeded) {
-                      errors.push(`Failed to unlink prefab from node '${nodeUuid}'`);
-                    }
-                    operationResult = {
-                      success: unlinkSucceeded,
-                      message: `Node unlinked from prefab (recursive)`,
-                      prefabUuid: encodedPrefabUuid
-                    };
-                  } catch (unlinkError) {
-                    errors.push(`Failed to unlink prefab recursively: ${unlinkError instanceof Error ? unlinkError.message : String(unlinkError)}`);
-                  }
-                  break;
-                }
-
-                case "locate": {
-                  try {
-                    // Get prefab asset information
-                    const assetInfo = await Editor.Message.request('asset-db', 'query-asset-info', prefabUuid);
-                    if (assetInfo) {
-                      operationResult = {
-                        success: true,
-                        message: `Located prefab asset`,
-                        prefabUuid: encodedPrefabUuid,
-                        prefabUrl: assetInfo.url,
-                        prefabPath: assetInfo.path,
-                        prefabName: assetInfo.name
-                      };
-                    } else {
-                      errors.push(`Could not locate prefab asset information for UUID ${encodedPrefabUuid}`);
-                    }
-                  } catch (locateError) {
-                    errors.push(`Failed to locate prefab: ${locateError instanceof Error ? locateError.message : String(locateError)}`);
-                  }
-                  break;
-                }
-
-                case "reset": {
-                  try {
-                    // Reset node to prefab state
-                    const result = await (Editor.Message as any).request('scene', 'restore-prefab', decodedNodeUuid);
-                    operationResult = {
-                      success: true,
-                      message: `Node reset to prefab state`,
-                      prefabUuid: encodedPrefabUuid
-                    };
-                  } catch (resetError) {
-                    errors.push(`Failed to reset node to prefab state: ${resetError instanceof Error ? resetError.message : String(resetError)}`);
-                  }
-                  break;
-                }
-
-                case "update-prefab": {
-                  try {
-                    // Use scene script to dump the node properly for prefab creation
-                    await Editor.Message.request('scene', 'execute-scene-script', {
-                      name: packageJSON.name,
-                      method: 'applyPrefabByNode',
-                      args: [decodedNodeUuid]
-                    }) as any;
-
-                    operationResult = {
-                      success: true,
-                      message: `Node modifications applied to prefab`,
-                      prefabUuid: encodedPrefabUuid
-                    };
-                  } catch (applyError) {
-                    errors.push(`Failed to apply modifications to prefab: ${applyError instanceof Error ? applyError.message : String(applyError)}`);
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        } catch (nodeError) {
-          errors.push(`Error accessing node: ${nodeError instanceof Error ? nodeError.message : String(nodeError)}`);
+    async ({ nodeUuid, operation }) => runToolWithContext(
+      {
+        toolName: 'node_linked_prefabs_operations',
+        operation,
+        effect: 'mutating-scene',
+        packageName: packageJSON.name,
+      },
+      async ({ request, callSceneScript }) => {
+        const decodedNodeUuid = decodeUuid(nodeUuid);
+        const nodeInfo = await request('scene', 'query-node', decodedNodeUuid) as any;
+        if (!nodeInfo) {
+          throw new Error(`Node with UUID ${nodeUuid} not found`);
         }
 
-        // Build compact JSON response
-        const capturedLogs: Array<string> = 
-          await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'getCapturedSceneLogs', args: [] });
+        const prefabInfo = nodeInfo.__prefab__ || nodeInfo._prefab;
+        if (!prefabInfo?.uuid) {
+          throw new Error(`Node ${nodeUuid} is not linked to a prefab`);
+        }
 
-        await Editor.Message.request('scene', 'snapshot');
+        const prefabUuid = prefabInfo.uuid;
+        const encodedPrefabUuid = encodeUuid(prefabUuid);
 
-        const result = {
-          success: operationResult?.success || false,
-          operation: operation,
-          nodeUuid: nodeUuid,
-          ...(operationResult?.prefabUuid && { prefabUuid: operationResult.prefabUuid }),
-          ...(operationResult?.prefabUrl && { prefabUrl: operationResult.prefabUrl }),
-          ...(operationResult?.prefabPath && { prefabPath: operationResult.prefabPath }),
-          ...(operationResult?.prefabName && { prefabName: operationResult.prefabName }),
-          ...(errors.length > 0 && { errors: errors }),
-          ...(capturedLogs.length > 0 && { logs: capturedLogs })
-        };
+        switch (operation) {
+          case "edit-prefab": {
+            const saveResult = await saveSceneNonInteractive(request);
+            if (!saveResult.success) {
+              throw new Error(`Failed to save current scene before opening prefab: ${saveResult.error || "unknown error"}`);
+            }
 
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }]
-        };
+            await request('asset-db', 'open-asset', prefabUuid);
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              message: 'Opened prefab for editing',
+            };
+          }
 
-      } catch (error) {
-        const capturedLogs: Array<string> = 
-          await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'getCapturedSceneLogs', args: [] });
-        
-        const errorResult = {
-          success: false,
-          operation: operation,
-          nodeUuid: nodeUuid,
-          error: error instanceof Error ? error.message : String(error),
-          ...(capturedLogs.length > 0 && { logs: capturedLogs })
-        };
+          case "unwrap": {
+            const unlinkResult = await callSceneScript('unlinkPrefabByNode', [decodedNodeUuid, false]) as boolean | null | undefined;
+            if (unlinkResult === false) {
+              throw new Error(`Failed to unlink prefab from node '${nodeUuid}'`);
+            }
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              message: 'Node unlinked from prefab (single level)',
+            };
+          }
 
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(errorResult, null, 2)
-          }]
-        };
+          case "unwrap-completely": {
+            const unlinkResult = await callSceneScript('unlinkPrefabByNode', [decodedNodeUuid, true]) as boolean | null | undefined;
+            if (unlinkResult === false) {
+              throw new Error(`Failed to unlink prefab from node '${nodeUuid}'`);
+            }
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              message: 'Node unlinked from prefab (recursive)',
+            };
+          }
+
+          case "locate": {
+            const assetInfo = await request('asset-db', 'query-asset-info', prefabUuid) as any;
+            if (!assetInfo) {
+              throw new Error(`Could not locate prefab asset information for UUID ${encodedPrefabUuid}`);
+            }
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              prefabUrl: assetInfo.url,
+              prefabPath: assetInfo.path,
+              prefabName: assetInfo.name,
+              message: 'Located prefab asset',
+            };
+          }
+
+          case "reset": {
+            await request('scene', 'restore-prefab', decodedNodeUuid);
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              message: 'Node reset to prefab state',
+            };
+          }
+
+          case "update-prefab": {
+            await callSceneScript('applyPrefabByNode', [decodedNodeUuid]);
+            return {
+              nodeUuid,
+              prefabUuid: encodedPrefabUuid,
+              message: 'Node modifications applied to prefab',
+            };
+          }
+        }
       }
-    }
+    )
   );
 }

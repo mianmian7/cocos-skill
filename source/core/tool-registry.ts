@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { ToolDefinition, ToolRegistration, ToolResult } from './tool-contract.js';
+import {
+  ToolDefinition,
+  ToolRegistration,
+  ToolResult,
+  normalizeToolResponseEnvelope,
+} from './tool-contract.js';
 
 export class ToolValidationError extends Error {
   readonly issues: z.ZodIssue[];
@@ -67,14 +72,14 @@ export class ToolRegistry {
         const textContent = result.content.find((c) => c.type === 'text');
         if (textContent?.text) {
           try {
-            return JSON.parse(textContent.text);
+            return normalizeToolResponseEnvelope(name, JSON.parse(textContent.text));
           } catch {
-            return textContent.text;
+            return normalizeToolResponseEnvelope(name, textContent.text);
           }
         }
       }
 
-      return result;
+      return normalizeToolResponseEnvelope(name, result);
     } catch (error) {
       if (error instanceof z.ZodError) {
         throw new ToolValidationError(`Validation error: ${error.message}`, error.issues);

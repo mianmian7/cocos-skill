@@ -107,9 +107,12 @@ test('batch_create should report a usable linked node uuid from query-nodes-by-a
   const text = response.content[0]?.text;
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
-  const notes = Array.isArray(body.notes) ? body.notes.join('\n') : '';
+  const notes = Array.isArray(body.data?.notes) ? body.data.notes.join('\n') : '';
 
-  assert.equal(Boolean(body.error), false);
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_prefab_assets');
+  assert.equal((body.meta as any)?.operation, 'batch_create');
+  assert.deepEqual(body.errors, []);
   assert.ok(notes.includes(`Prefab from node (UUID: '${originalNodeUuid}') created`));
   assert.ok(notes.includes(`Original node has new UUID: ${linkedNodeUuid}`));
 
@@ -151,6 +154,9 @@ test('open_for_editing should save current scene before opening prefab', async (
         if (channel === 'asset-db' && command === 'open-asset') {
           return undefined;
         }
+        if (channel === 'scene' && command === 'snapshot') {
+          return undefined;
+        }
         throw new Error(`unexpected command: ${channel}:${command}`);
       },
     },
@@ -167,13 +173,19 @@ test('open_for_editing should save current scene before opening prefab', async (
   const text = response.content[0]?.text;
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
-  assert.equal(Array.isArray(body.errors), false);
+  assert.equal(body.success, true);
+  assert.equal((body.meta as any)?.tool, 'operate_prefab_assets');
+  assert.equal((body.meta as any)?.operation, 'open_for_editing');
+  assert.deepEqual(body.errors, []);
 
   const saveIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'save-scene');
   const openIndex = calls.findIndex((call) => call.channel === 'asset-db' && call.command === 'open-asset');
+  const snapshotIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'snapshot');
   assert.ok(saveIndex >= 0, 'save-scene should be called');
   assert.ok(openIndex >= 0, 'open-asset should be called');
+  assert.ok(snapshotIndex >= 0, 'snapshot should be called');
   assert.ok(saveIndex < openIndex, 'save-scene should happen before open-asset');
+  assert.ok(openIndex < snapshotIndex, 'snapshot should happen after open-asset');
 });
 
 test('open_for_editing should not open prefab when save fails', async () => {
@@ -208,6 +220,9 @@ test('open_for_editing should not open prefab when save fails', async () => {
         if (channel === 'asset-db' && command === 'open-asset') {
           return undefined;
         }
+        if (channel === 'scene' && command === 'snapshot') {
+          return undefined;
+        }
         throw new Error(`unexpected command: ${channel}:${command}`);
       },
     },
@@ -225,7 +240,9 @@ test('open_for_editing should not open prefab when save fails', async () => {
   assert.ok(text, 'tool should return text response');
   const body = JSON.parse(text);
   assert.equal(Array.isArray(body.errors), true);
-  assert.match(body.errors.join('\n'), /Failed to save current scene before opening prefab: save failed/);
+  assert.equal((body.meta as any)?.tool, 'operate_prefab_assets');
+  assert.equal((body.meta as any)?.operation, 'open_for_editing');
+  assert.match(String(body.errors[0]?.message), /Failed to save current scene before opening prefab: save failed/);
 
   const openCalled = calls.some((call) => call.channel === 'asset-db' && call.command === 'open-asset');
   assert.equal(openCalled, false);

@@ -1,6 +1,7 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 
 interface CodeExecutionResult {
   success: boolean;
@@ -13,7 +14,10 @@ interface CodeExecutionResult {
 /**
  * Execute arbitrary code in the scene context
  */
+type SceneScriptCaller = (method: string, args?: unknown[]) => Promise<unknown>;
+
 async function executeCodeInScene(
+  callSceneScript: SceneScriptCaller,
   code: string, 
   context: {
     timeout?: number;
@@ -37,11 +41,7 @@ async function executeCodeInScene(
     }
     
     // Execute the code in scene context
-    const result = await Editor.Message.request('scene', 'execute-scene-script', {
-      name: packageJSON.name,
-      method: 'executeArbitraryCode',
-      args: [executableCode, context]
-    });
+    const result = await callSceneScript('executeArbitraryCode', [executableCode, context]);
     
     const executionTime = Date.now() - startTime;
     
@@ -174,102 +174,61 @@ export function registerExecuteSceneCodeTool(server: ToolRegistrar): void {
       captureConsole, 
       skipValidation,
       showApiDocs 
-    }) => {
-      await Editor.Message.request('scene', 'execute-scene-script', { 
-        name: packageJSON.name, 
-        method: 'startCaptureSceneLogs', 
-        args: [] 
-      });
-      
-      try {
-        let validationResult: { valid: boolean; issues: string[] } = { valid: true, issues: [] };
-        
-        // Validate code unless explicitly skipped
-        if (!skipValidation) {
-          validationResult = validateCode(code);
-          if (!validationResult.valid) {
-            const warningResult = {
-              success: false,
-              error: "Code validation failed",
-              validationIssues: validationResult.issues,
-              suggestion: "Review the code for potential security issues or use skipValidation=true if you trust the code"
-            };
-            
+    }) =>
+      runToolWithContext(
+        {
+          toolName: "execute_scene_code",
+          operation: "execute-scene-code",
+          effect: "mutating-scene",
+          packageName: packageJSON.name,
+          captureSceneLogs: true,
+        },
+        async ({ callSceneScript }) => {
+          let validationResult: { valid: boolean; issues: string[] } = { valid: true, issues: [] };
+          if (!skipValidation) {
+            validationResult = validateCode(code);
+            if (!validationResult.valid) {
+              return {
+                success: false,
+                data: {
+                  validationIssues: validationResult.issues,
+                  suggestion: "Review the code for potential security issues or use skipValidation=true if you trust the code",
+                  codeLength: code.length,
+                  validationSkipped: false,
+                  ...(showApiDocs ? { apiDocumentation: getApiDocumentation() } : {}),
+                },
+                errors: ["Code validation failed"],
+              };
+            }
+          }
+
+          const result = await executeCodeInScene(callSceneScript, code, {
+            timeout,
+            returnResult,
+            captureConsole,
+          });
+          const baseData = {
+            executionTime: result.executionTime,
+            codeLength: code.length,
+            validationSkipped: skipValidation,
+            ...(showApiDocs ? { apiDocumentation: getApiDocumentation() } : {}),
+          };
+
+          if (!result.success) {
             return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(warningResult, null, 2)
-              }]
+              success: false,
+              data: baseData,
+              errors: [result.error || "Code execution failed"],
             };
           }
-        }
-        
-        // Execute the code
-        const result = await executeCodeInScene(code, {
-          timeout,
-          returnResult,
-          captureConsole
-        });
-        
-        // Capture any logs from the execution
-        const capturedLogs = await Editor.Message.request('scene', 'execute-scene-script', { 
-          name: packageJSON.name, 
-          method: 'getCapturedSceneLogs', 
-          args: [] 
-        });
-        
-        if (capturedLogs && capturedLogs.length > 0) {
-          result.logs = capturedLogs;
-        }
-        
-        // Build response
-        const response: any = {
-          operation: "execute_scene_code",
-          success: result.success,
-          result: result.result,
-          error: result.error,
-          executionTime: result.executionTime,
-          logs: result.logs,
-          codeLength: code.length,
-          validationSkipped: skipValidation
-        };
-        
-        // Include API documentation if requested
-        if (showApiDocs) {
-          response.apiDocumentation = getApiDocumentation();
-        }
 
-        await Editor.Message.request('scene', 'snapshot');
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(response, null, 2)
-          }]
-        };
-        
-      } catch (error) {
-        const capturedLogs = await Editor.Message.request('scene', 'execute-scene-script', { 
-          name: packageJSON.name, 
-          method: 'getCapturedSceneLogs', 
-          args: [] 
-        });
-        
-        const errorResult = {
-          operation: "execute_scene_code",
-          success: false,
-          error: `Unexpected error during code execution: ${error instanceof Error ? error.message : String(error)}`,
-          logs: capturedLogs && capturedLogs.length > 0 ? capturedLogs : undefined,
-          codeLength: code.length
-        };
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(errorResult, null, 2)
-          }]
-        };
-      }
-    }
+          return {
+            data: {
+              ...baseData,
+              result: result.result,
+            },
+          };
+        }
+      )
   );
 }

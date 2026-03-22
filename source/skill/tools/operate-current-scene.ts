@@ -2,6 +2,7 @@ import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
 import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 import { getComponentInfo, setProperties, PropertySetSpec } from "../tool-utils";
 import { saveSceneNonInteractive } from "./scene-save.js";
 import * as fs from 'fs';
@@ -29,309 +30,194 @@ export function registerOperateCurrentSceneTool(server: ToolRegistrar): void {
       }
     },
     async ({ operation, sceneToOpenUrlOrUuid, includeTooltips, properties, lastLogsCount, maxDepth }) => {
-      try {
-        switch (operation) {
-          case "open": {
-            if (!sceneToOpenUrlOrUuid) {
+      const effect = operation === 'open' || operation === 'save' || operation === 'set-properties'
+        ? 'mutating-scene'
+        : 'read';
+
+      return runToolWithContext(
+        {
+          toolName: 'operate_current_scene',
+          operation,
+          effect,
+          packageName: packageJSON.name,
+        },
+        async ({ request }) => {
+          switch (operation) {
+            case "open": {
+              if (!sceneToOpenUrlOrUuid) {
+                throw new Error("sceneToOpenUrlOrUuid is required for 'open' operation");
+              }
+
+              let sceneInfo: any = null;
+              let sceneUuid: string | undefined;
+
+              if (sceneToOpenUrlOrUuid.startsWith('db://')) {
+                const queryResult = await request('asset-db', 'query-uuid', sceneToOpenUrlOrUuid);
+                if (!queryResult) {
+                  throw new Error(`Scene asset not found at URL: ${sceneToOpenUrlOrUuid}`);
+                }
+                sceneUuid = queryResult as string;
+              } else {
+                sceneUuid = decodeUuid(sceneToOpenUrlOrUuid);
+                const assetInfo = await request('asset-db', 'query-asset-info', sceneUuid) as any;
+                if (!assetInfo) {
+                  throw new Error(`Scene asset not found for UUID: ${sceneToOpenUrlOrUuid}`);
+                }
+                sceneInfo = assetInfo;
+              }
+
+              const saveResult = await saveSceneNonInteractive(request);
+              if (!saveResult.success) {
+                throw new Error(`Failed to save current scene before opening target scene: ${saveResult.error || "unknown error"}`);
+              }
+
+              await request('scene', 'open-scene', sceneUuid);
+              if (!sceneInfo) {
+                try {
+                  sceneInfo = await request('asset-db', 'query-asset-info', sceneUuid);
+                } catch {
+                  sceneInfo = null;
+                }
+              }
+
               return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "sceneToOpenUrlOrUuid is required for 'open' operation" })
-                }]
+                url: sceneInfo?.url || null,
+                uuid: sceneInfo?.uuid ? encodeUuid(sceneInfo.uuid) : null,
               };
             }
 
-            let sceneInfo: any = null;
-            let sceneUuid: string | undefined;
+            case "save":
+              return saveSceneNonInteractive(request);
 
-            if (sceneToOpenUrlOrUuid.startsWith('db://')) {
-              // It's a URL, get the UUID
-              const queryResult = await Editor.Message.request('asset-db', 'query-uuid', sceneToOpenUrlOrUuid);
-              if (!queryResult) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: JSON.stringify({ success: false, error: `Scene asset not found at URL: ${sceneToOpenUrlOrUuid}` })
-                  }]
+            case "inspect-hierarchy": {
+              const nodeTree = await request('scene', 'query-node-tree') as any;
+              if (!nodeTree) {
+                throw new Error("No scene loaded");
+              }
+
+              const buildHierarchy = (node: any, currentDepth = 0): any => {
+                const result: any = {
+                  name: node.name?.value || node.name || "Unnamed Node",
+                  uuid: encodeUuid(node.uuid?.value || node.uuid),
                 };
-              }
-              sceneUuid = queryResult;
-            } else {
-              // It's a UUID
-              sceneUuid = decodeUuid(sceneToOpenUrlOrUuid);
-              // Verify the UUID exists
-              const assetInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneUuid);
-              if (!assetInfo) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: JSON.stringify({ success: false, error: `Scene asset not found for UUID: ${sceneToOpenUrlOrUuid}` })
-                  }]
-                };
-              }
-              sceneInfo = assetInfo;
-            }
 
-            const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
-              Editor.Message.request(channel, command, ...args)
-            );
-            if (!saveResult.success) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    success: false,
-                    error: `Failed to save current scene before opening target scene: ${saveResult.error || "unknown error"}`,
-                    saveResult
-                  })
-                }]
-              };
-            }
+                if (node.__comps__ && node.__comps__.length > 0) {
+                  result.components = node.__comps__.map((component: any) => ({
+                    name: component.value.name.value,
+                    uuid: encodeUuid(component.value.uuid.value),
+                  }));
+                }
 
-            await Editor.Message.request('scene', 'open-scene', sceneUuid);
-            if (!sceneInfo) {
-              try {
-                sceneInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneUuid);
-              } catch {}
-            }
-
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  success: true,
-                  url: sceneInfo?.url || null,
-                  uuid: sceneInfo?.uuid ? encodeUuid(sceneInfo.uuid) : null
-                })
-              }]
-            };
-          }
-
-          case "save": {
-            const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
-              Editor.Message.request(channel, command, ...args)
-            );
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(saveResult)
-              }]
-            };
-          }
-
-          case "inspect-hierarchy": {
-            const nodeTree = await Editor.Message.request('scene', 'query-node-tree');
-            if (!nodeTree) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "No scene loaded" })
-                }]
-              };
-            }
-
-            // Build hierarchy tree recursively with depth limit
-            const buildHierarchy = (node: any, currentDepth: number = 0): any => {
-              const result: any = {
-                name: node.name?.value || node.name || "Unnamed Node",
-                uuid: encodeUuid(node.uuid?.value || node.uuid),
-              };
-
-              // Add components
-              if (node.__comps__ && node.__comps__.length > 0) {
-                result.components = node.__comps__.map((component: any) => ({
-                  name: component.value.name.value,
-                  uuid: encodeUuid(component.value.uuid.value)
-                }));
-              }
-
-              // Add children recursively if within depth limit
-              const shouldIncludeChildren = currentDepth < maxDepth;
-              if (shouldIncludeChildren && ((node.children && node.children.length > 0) || (node.__children__ && node.__children__.length > 0))) {
+                const shouldIncludeChildren = currentDepth < maxDepth;
                 const children = node.children || node.__children__;
-                result.children = children.map((child: any) => buildHierarchy(child, currentDepth + 1));
+                if (shouldIncludeChildren && Array.isArray(children) && children.length > 0) {
+                  result.children = children.map((child: any) => buildHierarchy(child, currentDepth + 1));
+                }
+
+                return result;
+              };
+
+              return {
+                hierarchy: buildHierarchy(nodeTree),
+              };
+            }
+
+            case "get-properties": {
+              const nodeTree = await request('scene', 'query-node-tree') as any;
+              if (!nodeTree) {
+                throw new Error("No scene loaded");
               }
 
-              return result;
-            };
+              const rootNodeInfo = await request('scene', 'query-node', nodeTree.uuid) as any;
+              if (!rootNodeInfo || !rootNodeInfo._globals) {
+                throw new Error("Scene globals not found");
+              }
 
-            const hierarchy = buildHierarchy(nodeTree);
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({ success: true, hierarchy })
-              }]
-            };
-          }
-
-          case "get-properties": {
-            // Get root scene node
-            const nodeTree = await Editor.Message.request('scene', 'query-node-tree') as any;
-            if (!nodeTree) {
+              const globalsInfo = await getComponentInfo(rootNodeInfo._globals, true, includeTooltips);
               return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "No scene loaded" })
-                }]
-              };
-            }
-
-            const rootNodeUuid = nodeTree.uuid;
-            const rootNodeInfo = await Editor.Message.request('scene', 'query-node', rootNodeUuid) as any;
-            
-            if (!rootNodeInfo || !rootNodeInfo._globals) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "Scene globals not found" })
-                }]
-              };
-            }
-
-            // Get component info for _globals
-            const globalsInfo = await getComponentInfo(rootNodeInfo._globals, true, includeTooltips);
-            
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  success: true,
+                success: !globalsInfo.error,
+                data: {
                   properties: globalsInfo.properties || {},
                   arrays: globalsInfo.arrays || {},
-                  error: globalsInfo.error
-                })
-              }]
-            };
-          }
-
-          case "set-properties": {
-            if (properties.length === 0) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "properties array is required for 'set-properties' operation" })
-                }]
+                },
+                errors: globalsInfo.error ? [globalsInfo.error] : [],
               };
             }
 
-            // Get root scene node
-            const nodeTree = await Editor.Message.request('scene', 'query-node-tree') as any;
-            if (!nodeTree) {
+            case "set-properties": {
+              if (properties.length === 0) {
+                throw new Error("properties array is required for 'set-properties' operation");
+              }
+
+              const nodeTree = await request('scene', 'query-node-tree') as any;
+              if (!nodeTree) {
+                throw new Error("No scene loaded");
+              }
+
+              const propertySpecs: PropertySetSpec[] = properties.map((prop: {
+                propertyPath: string;
+                propertyType: string;
+                propertyValue: any;
+              }) => ({
+                propertyPath: prop.propertyPath,
+                propertyType: prop.propertyType,
+                propertyValue: prop.propertyValue,
+              }));
+
+              const results = await setProperties(nodeTree.uuid, "_globals", propertySpecs);
+              const successCount = results.filter((result) => result.success).length;
+              const failures = results
+                .filter((result) => !result.success)
+                .map((result) => `Failed to set ${result.propertyPath}: ${result.error || 'unknown error'}`);
+
               return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({ success: false, error: "No scene loaded" })
-                }]
-              };
-            }
-
-            const rootNodeUuid = nodeTree.uuid;
-
-            // Use shared utility to set properties
-            const propertySpecs: PropertySetSpec[] = properties.map((prop: {
-              propertyPath: string;
-              propertyType: string;
-              propertyValue: any;
-            }) => ({
-              propertyPath: prop.propertyPath,
-              propertyType: prop.propertyType,
-              propertyValue: prop.propertyValue
-            }));
-
-            const results = await setProperties(rootNodeUuid, "_globals", propertySpecs);
-            const successCount = results.filter(r => r.success).length;
-
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  success: successCount === properties.length,
+                success: successCount === properties.length,
+                data: {
                   successCount,
                   totalCount: properties.length,
-                  results
-                })
-              }]
-            };
-          }
+                  results,
+                },
+                errors: failures,
+              };
+            }
 
-          case "get-last-logs": {
-            try {
-              // First try to read from the project log file
+            case "get-last-logs": {
               let logs: string[] = [];
               let source = "project-file";
-              
+
               try {
-                // Get the project log file path
                 const logFilePath = path.join(Editor.Project.path, 'temp', 'logs', 'project.log');
-                
-                // Try to read the log file directly
-                if (fs.existsSync(logFilePath)) {
-                  const content = fs.readFileSync(logFilePath, 'utf8');
-                  const lines = content.split('\n').filter(line => line.trim());
-                  const requestedCount = lastLogsCount || 500;
-                  logs = lines.slice(-requestedCount);
-                  source = "project-file";
-                } else {
+                if (!fs.existsSync(logFilePath)) {
                   throw new Error('Project log file not found');
                 }
+
+                const content = fs.readFileSync(logFilePath, 'utf8');
+                const lines = content.split('\n').filter((line) => line.trim());
+                const requestedCount = lastLogsCount || 500;
+                logs = lines.slice(-requestedCount);
               } catch (projectLogError) {
-                // Fallback to existing scene logging
                 console.log(`Project log file not accessible, falling back to scene logs: ${projectLogError}`);
-                
-                const lastLogs = await Editor.Message.request('scene', 'execute-scene-script', { 
-                  name: packageJSON.name, 
-                  method: 'getLastSceneLogs', 
-                  args: [lastLogsCount] 
+                const lastSceneLogs = await request('scene', 'execute-scene-script', {
+                  name: packageJSON.name,
+                  method: 'getLastSceneLogs',
+                  args: [lastLogsCount],
                 });
-                
-                logs = lastLogs || [];
+
+                logs = Array.isArray(lastSceneLogs)
+                  ? lastSceneLogs.filter((entry): entry is string => typeof entry === 'string')
+                  : [];
                 source = "scene-buffer";
               }
-              
+
               return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    operation: "get-last-logs",
-                    success: true,
-                    logs: logs,
-                    totalLogsRetrieved: logs.length
-                  }, null, 2)
-                }]
-              };
-            } catch (error) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    operation: "get-last-logs",
-                    success: false,
-                    error: `Failed to retrieve logs: ${error instanceof Error ? error.message : String(error)}`
-                  }, null, 2)
-                }]
+                logs,
+                totalLogsRetrieved: logs.length,
+                source,
               };
             }
           }
-
-          default:
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({ success: false, error: "Unknown operation" })
-              }]
-            };
         }
-      } catch (error) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : String(error)
-            })
-          }]
-        };
-      }
+      );
     }
   );
 }

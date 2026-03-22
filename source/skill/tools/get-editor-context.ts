@@ -1,5 +1,7 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
+import packageJSON from "../../../package.json";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 
 /**
  * get_editor_context - 编辑器上下文快照工具
@@ -44,6 +46,8 @@ interface GetContextOptions {
   parentUuid?: string;        // 新：只查询某个父节点下的子节点
 }
 
+type EditorRequest = (channel: string, command: string, ...args: unknown[]) => Promise<unknown>;
+
 function applyModeFallback(context: EditorContext): void {
   if (context.mode !== 'unknown') {
     return;
@@ -63,7 +67,7 @@ function applyModeFallback(context: EditorContext): void {
   }
 }
 
-async function getEditorContext(options: GetContextOptions): Promise<EditorContext> {
+async function getEditorContext(options: GetContextOptions, request: EditorRequest): Promise<EditorContext> {
   const {
     includeHierarchy = true,
     includeRecentLogs = true,
@@ -85,7 +89,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
 
   // 1. 获取当前场景信息
   try {
-    const sceneInfo: any = await Editor.Message.request('scene', 'query-scene-info');
+    const sceneInfo: any = await request('scene', 'query-scene-info');
     if (sceneInfo) {
       context.currentScene = sceneInfo.url || sceneInfo.name;
       context.isDirty = sceneInfo.dirty || false;
@@ -97,7 +101,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
 
   if (context.mode === 'unknown') {
     try {
-      const prefabInfo: any = await Editor.Message.request('scene', 'query-prefab-info');
+      const prefabInfo: any = await request('scene', 'query-prefab-info');
       if (prefabInfo) {
         context.currentPrefab = prefabInfo.url || prefabInfo.name;
         context.mode = 'prefab';
@@ -113,7 +117,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
       const selection = Editor.Selection.getSelected('node') || [];
       for (const uuid of selection.slice(0, 10)) {
         try {
-          const nodeInfo: any = await Editor.Message.request('scene', 'query-node', uuid);
+          const nodeInfo: any = await request('scene', 'query-node', uuid);
           if (nodeInfo) {
             const components = nodeInfo.__comps__?.map((c: any) => c.type || c.cid) || [];
             context.selectedNodes.push({
@@ -136,7 +140,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
   // 3. 获取层级摘要
   if (includeHierarchy) {
     try {
-      const tree: any = await Editor.Message.request('scene', 'query-node-tree');
+      const tree: any = await request('scene', 'query-node-tree');
       if (tree) {
         const rootNodes: NodeSummary[] = [];
         let totalCount = 0;
@@ -238,7 +242,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
   // hierarchy 之后再次尝试 prefab 信息，避免 query-scene-info 无异常但返回空时 mode 悬空
   if (context.mode === 'unknown') {
     try {
-      const prefabInfo: any = await Editor.Message.request('scene', 'query-prefab-info');
+      const prefabInfo: any = await request('scene', 'query-prefab-info');
       if (prefabInfo) {
         context.currentPrefab = prefabInfo.url || prefabInfo.name;
         context.mode = 'prefab';
@@ -253,7 +257,7 @@ async function getEditorContext(options: GetContextOptions): Promise<EditorConte
   // 4. 获取最近日志
   if (includeRecentLogs && !summaryOnly) {
     try {
-      const logs = await Editor.Message.request('scene', 'execute-scene-script', {
+      const logs = await request('scene', 'execute-scene-script', {
         name: 'cocos-skill',
         method: 'getLastSceneLogs',
         args: [maxLogLines]
@@ -309,26 +313,33 @@ export function registerGetEditorContextTool(server: ToolRegistrar): void {
         parentUuid: z.string().optional().describe("只查询指定父节点下的子节点")
       }
     },
-    async (args) => {
-      const summaryOnly = args.summaryOnly ?? false;
-      const maxNodes = args.maxNodes ?? 100;
-      
-      const context = await getEditorContext({
-        includeHierarchy: args.includeHierarchy ?? true,
-        includeRecentLogs: args.includeRecentLogs ?? true,
-        summaryOnly,
-        maxDepth: Math.min(Math.max(args.maxDepth ?? 2, 1), 10),
-        maxNodes: summaryOnly ? Math.min(maxNodes, 5000) : Math.min(maxNodes, 500),
-        maxLogLines: Math.min(Math.max(args.maxLogLines ?? 20, 5), 100),
-        parentUuid: args.parentUuid
-      });
+    async (args) =>
+      runToolWithContext(
+        {
+          toolName: "get_editor_context",
+          operation: "get-editor-context",
+          effect: "read",
+          packageName: packageJSON.name,
+        },
+        async ({ request }) => {
+          const summaryOnly = args.summaryOnly ?? false;
+          const maxNodes = args.maxNodes ?? 100;
 
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify(context, null, 2)
-        }]
-      };
-    }
+          return {
+            data: await getEditorContext(
+              {
+                includeHierarchy: args.includeHierarchy ?? true,
+                includeRecentLogs: args.includeRecentLogs ?? true,
+                summaryOnly,
+                maxDepth: Math.min(Math.max(args.maxDepth ?? 2, 1), 10),
+                maxNodes: summaryOnly ? Math.min(maxNodes, 5000) : Math.min(maxNodes, 500),
+                maxLogLines: Math.min(Math.max(args.maxLogLines ?? 20, 5), 100),
+                parentUuid: args.parentUuid,
+              },
+              request
+            ),
+          };
+        }
+      )
   );
 }

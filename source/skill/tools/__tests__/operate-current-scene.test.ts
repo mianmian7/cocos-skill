@@ -56,6 +56,18 @@ test('open should save current scene before opening target scene', async () => {
         if (channel === 'scene' && command === 'open-scene') {
           return undefined;
         }
+        if (channel === 'scene' && command === 'execute-scene-script') {
+          const payload = args[0] as { method?: string } | undefined;
+          if (payload?.method === 'startCaptureSceneLogs') {
+            return undefined;
+          }
+          if (payload?.method === 'getCapturedSceneLogs') {
+            return [];
+          }
+        }
+        if (channel === 'scene' && command === 'snapshot') {
+          return undefined;
+        }
         throw new Error(`unexpected command: ${channel}:${command}`);
       },
     },
@@ -71,12 +83,19 @@ test('open should save current scene before opening target scene', async () => {
 
   const body = parseResponse(response);
   assert.equal(body.success, true);
+  assert.deepEqual(body.errors, []);
+  assert.equal((body.meta as any)?.tool, 'operate_current_scene');
+  assert.equal((body.meta as any)?.operation, 'open');
+  assert.equal((body.data as any)?.url, 'db://assets/scenes/Target.scene');
 
   const saveIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'save-scene');
   const openIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'open-scene');
+  const snapshotIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'snapshot');
   assert.ok(saveIndex >= 0, 'save-scene should be called');
   assert.ok(openIndex >= 0, 'open-scene should be called');
+  assert.ok(snapshotIndex >= 0, 'snapshot should be called');
   assert.ok(saveIndex < openIndex, 'save-scene should happen before open-scene');
+  assert.ok(openIndex < snapshotIndex, 'snapshot should happen after open-scene');
 });
 
 test('open should stop when pre-switch save fails', async () => {
@@ -102,6 +121,18 @@ test('open should stop when pre-switch save fails', async () => {
         if (channel === 'scene' && command === 'open-scene') {
           return undefined;
         }
+        if (channel === 'scene' && command === 'execute-scene-script') {
+          const payload = args[0] as { method?: string } | undefined;
+          if (payload?.method === 'startCaptureSceneLogs') {
+            return undefined;
+          }
+          if (payload?.method === 'getCapturedSceneLogs') {
+            return [];
+          }
+        }
+        if (channel === 'scene' && command === 'snapshot') {
+          return undefined;
+        }
         throw new Error(`unexpected command: ${channel}:${command}`);
       },
     },
@@ -117,7 +148,9 @@ test('open should stop when pre-switch save fails', async () => {
 
   const body = parseResponse(response);
   assert.equal(body.success, false);
-  assert.match(String(body.error), /Failed to save current scene before opening target scene: save failed/);
+  assert.equal((body.meta as any)?.tool, 'operate_current_scene');
+  assert.equal((body.meta as any)?.operation, 'open');
+  assert.match(String((body.errors as any)?.[0]?.message), /Failed to save current scene before opening target scene: save failed/);
 
   const openCalled = calls.some((call) => call.channel === 'scene' && call.command === 'open-scene');
   assert.equal(openCalled, false);

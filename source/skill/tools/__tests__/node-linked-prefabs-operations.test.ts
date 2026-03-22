@@ -78,12 +78,19 @@ test('edit-prefab should save current scene before opening linked prefab', async
   const response = await handler({ nodeUuid, operation: 'edit-prefab' });
   const body = parseResponse(response);
   assert.equal(body.success, true);
+  assert.deepEqual(body.errors, []);
+  assert.equal((body.meta as any)?.tool, 'node_linked_prefabs_operations');
+  assert.equal((body.meta as any)?.operation, 'edit-prefab');
+  assert.equal((body.data as any)?.prefabUuid, prefabUuid);
 
   const saveIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'save-scene');
   const openIndex = calls.findIndex((call) => call.channel === 'asset-db' && call.command === 'open-asset');
+  const snapshotIndex = calls.findIndex((call) => call.channel === 'scene' && call.command === 'snapshot');
   assert.ok(saveIndex >= 0, 'save-scene should be called');
   assert.ok(openIndex >= 0, 'open-asset should be called');
+  assert.ok(snapshotIndex >= 0, 'snapshot should be called');
   assert.ok(saveIndex < openIndex, 'save-scene should happen before open-asset');
+  assert.ok(openIndex < snapshotIndex, 'snapshot should happen after open-asset');
 });
 
 test('edit-prefab should stop when pre-switch save fails', async () => {
@@ -131,7 +138,9 @@ test('edit-prefab should stop when pre-switch save fails', async () => {
   const response = await handler({ nodeUuid, operation: 'edit-prefab' });
   const body = parseResponse(response);
   assert.equal(body.success, false);
-  assert.match(String((body as any).errors?.join('\n')), /Failed to save current scene before opening prefab: save failed/);
+  assert.equal((body.meta as any)?.tool, 'node_linked_prefabs_operations');
+  assert.equal((body.meta as any)?.operation, 'edit-prefab');
+  assert.match(String((body.errors as any)?.[0]?.message), /Failed to save current scene before opening prefab: save failed/);
 
   const openCalled = calls.some((call) => call.channel === 'asset-db' && call.command === 'open-asset');
   assert.equal(openCalled, false);

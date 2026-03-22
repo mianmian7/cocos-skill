@@ -1,6 +1,9 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
-import { decodeUuid, encodeUuid } from "../uuid-codec.js";
+import packageJSON from "../../../package.json";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
+import type { ToolEffect } from "../runtime/tool-context.js";
+import { decodeUuid } from "../uuid-codec.js";
 import { saveSceneNonInteractive } from "./scene-save.js";
 
 /**
@@ -88,6 +91,8 @@ interface PendingAction {
 const pendingActions = new Map<string, PendingAction>();
 const TOKEN_EXPIRY_MS = 5 * 60 * 1000; // 5分钟过期
 
+type EditorRequest = (channel: string, command: string, ...args: unknown[]) => Promise<unknown>;
+
 function generateToken(): string {
   return `gated_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 }
@@ -101,14 +106,14 @@ function cleanExpiredTokens(): void {
   }
 }
 
-async function executeGatedAction(action: GatedActionType, params: any): Promise<any> {
+async function executeGatedAction(request: EditorRequest, action: GatedActionType, params: any): Promise<any> {
   switch (action) {
     case 'delete_nodes': {
       const uuids: string[] = Array.isArray(params.uuids) ? params.uuids : [params.uuid];
       const results = [];
       for (const uuid of uuids) {
         const decodedUuid = decodeUuid(uuid);
-        await Editor.Message.request('scene', 'remove-node', { uuid: decodedUuid });
+        await request('scene', 'remove-node', { uuid: decodedUuid });
         results.push({ uuid, deleted: true });
       }
       return { deletedNodes: results };
@@ -118,16 +123,14 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
       const urls: string[] = Array.isArray(params.urls) ? params.urls : [params.url];
       const results = [];
       for (const url of urls) {
-        await Editor.Message.request('asset-db', 'delete-asset', url);
+        await request('asset-db', 'delete-asset', url);
         results.push({ url, deleted: true });
       }
       return { deletedAssets: results };
     }
 
     case 'save_scene': {
-      const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
-        Editor.Message.request(channel, command, ...args)
-      );
+      const saveResult = await saveSceneNonInteractive(request);
       if (!saveResult.success) {
         throw new Error(saveResult.error || 'Failed to save scene.');
       }
@@ -135,9 +138,7 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
     }
 
     case 'save_all': {
-      const saveResult = await saveSceneNonInteractive((channel, command, ...args) =>
-        Editor.Message.request(channel, command, ...args)
-      );
+      const saveResult = await saveSceneNonInteractive(request);
       if (!saveResult.success) {
         throw new Error(saveResult.error || 'Failed to save all changes.');
       }
@@ -149,8 +150,8 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
     }
 
     case 'execute_code': {
-      const result = await Editor.Message.request('scene', 'execute-scene-script', {
-        name: 'cocos-skill',
+      const result = await request('scene', 'execute-scene-script', {
+        name: packageJSON.name,
         method: 'executeArbitraryCode',
         args: [params.code, params.options || {}]
       });
@@ -162,7 +163,7 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
       const results = [];
       for (const mod of modifications) {
         const decodedUuid = decodeUuid(mod.uuid);
-        await Editor.Message.request('scene', 'set-property', {
+        await request('scene', 'set-property', {
           uuid: decodedUuid,
           path: mod.path,
           dump: mod.dump
@@ -173,11 +174,11 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
     }
 
     case 'clear_scene': {
-      const tree: any = await Editor.Message.request('scene', 'query-node-tree');
+      const tree: any = await request('scene', 'query-node-tree');
       const rootChildren = tree?.children || [];
       const results = [];
       for (const child of rootChildren) {
-        await Editor.Message.request('scene', 'remove-node', { uuid: child.uuid });
+        await request('scene', 'remove-node', { uuid: child.uuid });
         results.push({ uuid: child.uuid, name: child.name, deleted: true });
       }
       return { clearedNodes: results };
@@ -186,6 +187,16 @@ async function executeGatedAction(action: GatedActionType, params: any): Promise
     default:
       throw new Error(`Unknown action type: ${action}`);
   }
+}
+
+function getGatedActionEffect(action: GatedActionType, willExecute: boolean): ToolEffect {
+  if (!willExecute) {
+    return "read";
+  }
+  if (action === "delete_assets") {
+    return "mutating-asset";
+  }
+  return "mutating-scene";
 }
 
 function generateActionSummary(action: GatedActionType, params: any): string {
@@ -252,150 +263,97 @@ export function registerApplyGatedActionTool(server: ToolRegistrar): void {
     async (args) => {
       const { action, params = {}, approvalToken, skipConfirmation = false } = args;
       const actionType = action as GatedActionType;
-      
-      // 清理过期 token
-      cleanExpiredTokens();
-
       const actionDef = GATED_ACTIONS[actionType];
-      if (!actionDef) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
+      const willExecute = Boolean(approvalToken) || (!actionDef?.requiresConfirmation && skipConfirmation);
+
+      return runToolWithContext(
+        {
+          toolName: "apply_gated_action",
+          operation: approvalToken ? "approval-execute" : "approval-preview",
+          effect: getGatedActionEffect(actionType, willExecute),
+          packageName: packageJSON.name,
+          captureSceneLogs: false,
+          meta: { action: actionType },
+        },
+        async ({ request }) => {
+          cleanExpiredTokens();
+
+          if (!actionDef) {
+            return {
               success: false,
-              error: `Unknown action type: ${actionType}`,
-              availableActions: Object.keys(GATED_ACTIONS)
-            }, null, 2)
-          }],
-          isError: true
-        };
-      }
+              data: { availableActions: Object.keys(GATED_ACTIONS) },
+              errors: [`Unknown action type: ${actionType}`],
+            };
+          }
 
-      // 如果提供了 approvalToken，执行操作
-      if (approvalToken) {
-        const pending = pendingActions.get(approvalToken);
-        
-        if (!pending) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
+          if (approvalToken) {
+            const pending = pendingActions.get(approvalToken);
+            if (!pending) {
+              return {
                 success: false,
-                error: 'Invalid or expired approval token',
-                hint: 'Request a new token by calling without approvalToken'
-              }, null, 2)
-            }],
-            isError: true
-          };
-        }
+                data: { hint: "Request a new token by calling without approvalToken" },
+                errors: ["Invalid or expired approval token"],
+              };
+            }
 
-        // 验证 action 类型匹配
-        if (pending.action !== actionType) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
+            if (pending.action !== actionType) {
+              return {
                 success: false,
-                error: `Token was issued for '${pending.action}', not '${actionType}'`
-              }, null, 2)
-            }],
-            isError: true
-          };
-        }
+                data: { tokenAction: pending.action },
+                errors: [`Token was issued for '${pending.action}', not '${actionType}'`],
+              };
+            }
 
-        // 执行操作
-        pendingActions.delete(approvalToken);
-        
-        try {
-          const result = await executeGatedAction(actionType, pending.params);
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: true,
+            pendingActions.delete(approvalToken);
+            const result = await executeGatedAction(request, actionType, pending.params);
+            return {
+              data: {
                 action: actionType,
                 executed: true,
-                result
-              }, null, 2)
-            }]
-          };
-        } catch (error: any) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: false,
-                action: actionType,
-                error: error.message || String(error)
-              }, null, 2)
-            }],
-            isError: true
-          };
-        }
-      }
+                result,
+              },
+            };
+          }
 
-      // 对于低风险操作且 skipConfirmation=true，直接执行
-      if (!actionDef.requiresConfirmation && skipConfirmation) {
-        try {
-          const result = await executeGatedAction(actionType, params);
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: true,
+          if (!actionDef.requiresConfirmation && skipConfirmation) {
+            const result = await executeGatedAction(request, actionType, params);
+            return {
+              data: {
                 action: actionType,
                 executed: true,
                 skippedConfirmation: true,
-                result
-              }, null, 2)
-            }]
-          };
-        } catch (error: any) {
+                result,
+              },
+            };
+          }
+
+          const token = generateToken();
+          const summary = generateActionSummary(actionType, params);
+          const now = Date.now();
+          pendingActions.set(token, {
+            token,
+            action: actionType,
+            params,
+            summary,
+            createdAt: now,
+            expiresAt: now + TOKEN_EXPIRY_MS,
+          });
+
           return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: false,
-                action: actionType,
-                error: error.message || String(error)
-              }, null, 2)
-            }],
-            isError: true
+            data: {
+              requiresApproval: true,
+              action: actionType,
+              riskLevel: actionDef.riskLevel,
+              summary,
+              approvalToken: token,
+              expiresIn: "5 minutes",
+              instruction: actionDef.requiresConfirmation
+                ? "请确认此操作。确认后使用相同的 action 和 approvalToken 再次调用以执行。"
+                : "此操作风险较低。可直接使用 approvalToken 执行，或设置 skipConfirmation=true 跳过确认。",
+            },
           };
         }
-      }
-
-      // 生成审批 token
-      const token = generateToken();
-      const summary = generateActionSummary(actionType, params);
-      const now = Date.now();
-      
-      pendingActions.set(token, {
-        token,
-        action: actionType,
-        params,
-        summary,
-        createdAt: now,
-        expiresAt: now + TOKEN_EXPIRY_MS
-      });
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            success: true,
-            requiresApproval: true,
-            action: actionType,
-            riskLevel: actionDef.riskLevel,
-            summary,
-            approvalToken: token,
-            expiresIn: '5 minutes',
-            instruction: actionDef.requiresConfirmation
-              ? '请确认此操作。确认后使用相同的 action 和 approvalToken 再次调用以执行。'
-              : '此操作风险较低。可直接使用 approvalToken 执行，或设置 skipConfirmation=true 跳过确认。'
-          }, null, 2)
-        }]
-      };
+      );
     }
   );
 }

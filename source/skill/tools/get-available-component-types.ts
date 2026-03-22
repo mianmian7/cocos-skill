@@ -1,7 +1,7 @@
-import { ExecuteSceneScriptMethodOptions } from "@cocos/creator-types/editor/packages/scene/@types/public";
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
 import packageJSON from '../../../package.json';
+import { runToolWithContext } from "../runtime/tool-runtime.js";
 
 export function registerGetAvailableComponentTypesTool(server: ToolRegistrar): void {
   server.registerTool(
@@ -13,66 +13,37 @@ export function registerGetAvailableComponentTypesTool(server: ToolRegistrar): v
         nameFilter: z.string().optional().describe("Optional substring to filter component types")
       }
     },
-    async ({ nameFilter }) => {
-      await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'startCaptureSceneLogs', args: [] });
-      try {
-        const errors: string[] = [];
-        let componentTypes: Array<string> = [];
+    async ({ nameFilter }) =>
+      runToolWithContext(
+        {
+          toolName: "get_available_component_types",
+          operation: "list-component-types",
+          effect: "read",
+          packageName: packageJSON.name,
+        },
+        async ({ request }) => {
+          const result = await request("scene", "execute-scene-script", {
+            name: packageJSON.name,
+            method: "queryComponentTypes",
+            args: [],
+          });
 
-        try {
-          const options: ExecuteSceneScriptMethodOptions = {
-              name: packageJSON.name,
-              method: 'queryComponentTypes',
-              args: []
-          };
-          componentTypes = await Editor.Message.request('scene', 'execute-scene-script', options);
-        } catch (queryError) {
-          errors.push(`Error querying component types: ${queryError instanceof Error ? queryError.message : String(queryError)}`);
-        }
-
-        componentTypes = componentTypes.filter(type => !nameFilter || type.includes(nameFilter));
-
-        // Build response message
-        let message = '';
-        
-        if (componentTypes.length > 0) {
-          message = componentTypes.join(', ');
-        } else {
-          message = 'No component types found';
-          if (nameFilter) {
-            message += ` with name filter '${nameFilter}'`;
+          if (!Array.isArray(result)) {
+            throw new Error("Unexpected component type query result");
           }
+
+          const componentTypes = result.filter(
+            (type): type is string => typeof type === "string" && (!nameFilter || type.includes(nameFilter))
+          );
+
+          return {
+            data: { componentTypes },
+            warnings:
+              componentTypes.length === 0
+                ? [`No component types found${nameFilter ? ` with name filter '${nameFilter}'` : ""}`]
+                : [],
+          };
         }
-
-        if (errors.length > 0) {
-          message += `\n\nWarnings/Errors:\n${errors.join('\n')}`;
-        }
-
-        const capturedLogs: Array<string> = 
-          await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'getCapturedSceneLogs', args: [] });
-        capturedLogs.forEach(log => message += ("\n" + log));
-
-        return {
-          content: [{
-            type: "text",
-            text: message
-          }]
-        };
-
-      } catch (error) {
-        const capturedLogs: Array<string> = 
-          await Editor.Message.request('scene', 'execute-scene-script', { name: packageJSON.name, method: 'getCapturedSceneLogs', args: [] });
-        
-        let errorMessage = `Error retrieving component types: ${error instanceof Error ? error.message : String(error)}`;
-        capturedLogs.forEach(log => errorMessage += ("\n" + log));
-
-        return {
-          content: [{
-            type: "text",
-            text: errorMessage
-          }]
-        };
-      }
-    }
+      )
   );
 }

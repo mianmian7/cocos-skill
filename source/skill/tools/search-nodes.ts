@@ -1,5 +1,8 @@
 import type { ToolRegistrar } from "../../core/tool-contract.js";
 import { z } from "zod";
+import packageJSON from "../../../package.json";
+import { runToolWithContext } from "../runtime/tool-runtime.js";
+import { encodeUuid } from "../uuid-codec.js";
 
 /**
  * search_nodes - 场景节点搜索工具
@@ -26,6 +29,8 @@ interface SearchOptions {
   offset?: number;           // 分页偏移
 }
 
+type EditorRequest = (channel: string, command: string, ...args: unknown[]) => Promise<unknown>;
+
 function matchPattern(text: string, pattern: string): boolean {
   if (!pattern) return true;
   // 将 * 通配符转换为正则表达式
@@ -33,7 +38,44 @@ function matchPattern(text: string, pattern: string): boolean {
   return regex.test(text);
 }
 
-async function searchNodes(options: SearchOptions): Promise<{
+function collectMatches(node: any, currentPath: string, options: SearchOptions, matches: Array<{ uuid: string; name: string; path: string }>): void {
+  const nodeName = node?.name || "Unknown";
+  const nodePath = currentPath ? `${currentPath}/${nodeName}` : nodeName;
+  const nodeUuid = node?.uuid;
+
+  const nameMatch = !options.namePattern || matchPattern(nodeName, options.namePattern);
+  const pathMatch = !options.pathPattern || matchPattern(nodePath, options.pathPattern);
+  if (nodeUuid && nameMatch && pathMatch) {
+    matches.push({
+      uuid: nodeUuid,
+      name: nodeName,
+      path: nodePath,
+    });
+  }
+
+  if (Array.isArray(node?.children)) {
+    for (const child of node.children) {
+      collectMatches(child, nodePath, options, matches);
+    }
+  }
+}
+
+async function getNodeComponents(request: EditorRequest, nodeUuid: string): Promise<string[]> {
+  try {
+    const nodeInfo: any = await request("scene", "query-node", nodeUuid);
+    if (!Array.isArray(nodeInfo?.__comps__)) {
+      return [];
+    }
+    return nodeInfo.__comps__.map((component: any) => component.type || component.cid || "");
+  } catch {
+    return [];
+  }
+}
+
+async function searchNodes(
+  request: EditorRequest,
+  options: SearchOptions
+): Promise<{
   results: SearchResult[];
   total: number;
   hasMore: boolean;
@@ -47,107 +89,40 @@ async function searchNodes(options: SearchOptions): Promise<{
   } = options;
 
   const results: SearchResult[] = [];
-  let total = 0;
+  const tree: any = await request("scene", "query-node-tree");
+  if (!tree) {
+    return { results: [], total: 0, hasMore: false };
+  }
 
-  try {
-    const tree: any = await Editor.Message.request('scene', 'query-node-tree');
-    if (!tree) {
-      return { results: [], total: 0, hasMore: false };
+  const allMatches: Array<{ uuid: string; name: string; path: string }> = [];
+  const roots = Array.isArray(tree) ? tree : [tree];
+  for (const root of roots) {
+    collectMatches(root, "", { namePattern, pathPattern }, allMatches);
+  }
+
+  const filteredMatches: Array<{ uuid: string; name: string; path: string; components: string[] }> = [];
+  for (const match of allMatches) {
+    const components = await getNodeComponents(request, match.uuid);
+    const hasComponent = !componentType
+      || components.some((entry) => entry.toLowerCase().includes(componentType.toLowerCase()));
+
+    if (hasComponent) {
+      filteredMatches.push({
+        ...match,
+        components,
+      });
     }
+  }
 
-    // 收集所有匹配的节点
-    const allMatches: { uuid: string; name: string; path: string }[] = [];
-
-    const traverse = (node: any, currentPath: string) => {
-      const nodePath = currentPath ? `${currentPath}/${node.name}` : node.name;
-      
-      // 检查名称匹配
-      const nameMatch = !namePattern || matchPattern(node.name || '', namePattern);
-      // 检查路径匹配
-      const pathMatch = !pathPattern || matchPattern(nodePath, pathPattern);
-
-      if (nameMatch && pathMatch) {
-        allMatches.push({
-          uuid: node.uuid,
-          name: node.name || 'Unknown',
-          path: nodePath
-        });
-      }
-
-      // 递归子节点
-      if (node.children) {
-        for (const child of node.children) {
-          traverse(child, nodePath);
-        }
-      }
-    };
-
-    // 遍历所有根节点
-    let roots: any[] = [];
-    if (Array.isArray(tree)) {
-      roots = tree;
-    } else if (tree.children) {
-      roots = tree.children;
-    }
-
-    for (const root of roots) {
-      traverse(root, '');
-    }
-
-    // 如果需要按组件过滤，需要查询每个节点的详细信息
-    if (componentType) {
-      for (const match of allMatches) {
-        try {
-          const nodeInfo: any = await Editor.Message.request('scene', 'query-node', match.uuid);
-          if (nodeInfo && nodeInfo.__comps__) {
-            const components = nodeInfo.__comps__.map((c: any) => c.type || c.cid || '');
-            const hasComponent = components.some((c: string) => 
-              c.toLowerCase().includes(componentType.toLowerCase())
-            );
-            if (hasComponent) {
-              total++;
-              if (total > offset && results.length < limit) {
-                results.push({
-                  uuid: match.uuid,
-                  name: match.name,
-                  path: match.path,
-                  components
-                });
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } else {
-      // 不需要组件过滤，直接分页
-      total = allMatches.length;
-      const paged = allMatches.slice(offset, offset + limit);
-      
-      // 获取组件信息
-      for (const match of paged) {
-        try {
-          const nodeInfo: any = await Editor.Message.request('scene', 'query-node', match.uuid);
-          const components = nodeInfo?.__comps__?.map((c: any) => c.type || c.cid || '') || [];
-          results.push({
-            uuid: match.uuid,
-            name: match.name,
-            path: match.path,
-            components
-          });
-        } catch {
-          results.push({
-            uuid: match.uuid,
-            name: match.name,
-            path: match.path,
-            components: []
-          });
-        }
-      }
-    }
-  } catch {
-    // ignore
+  const total = filteredMatches.length;
+  const paged = filteredMatches.slice(offset, offset + limit);
+  for (const match of paged) {
+    results.push({
+      uuid: encodeUuid(match.uuid),
+      name: match.name,
+      path: match.path,
+      components: match.components,
+    });
   }
 
   return {
@@ -190,41 +165,47 @@ export function registerSearchNodesTool(server: ToolRegistrar): void {
         offset: z.number().min(0).default(0).describe("分页偏移")
       }
     },
-    async (args) => {
-      const { namePattern, componentType, pathPattern, limit = 50, offset = 0 } = args;
+    async (args) =>
+      runToolWithContext(
+        {
+          toolName: "search_nodes",
+          operation: "search-nodes",
+          effect: "read",
+          packageName: packageJSON.name,
+        },
+        async ({ request }) => {
+          const { namePattern, componentType, pathPattern, limit = 50, offset = 0 } = args;
+          const query = { namePattern, componentType, pathPattern, limit, offset };
 
-      // 至少需要一个搜索条件
-      if (!namePattern && !componentType && !pathPattern) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
+          if (!namePattern && !componentType && !pathPattern) {
+            return {
               success: false,
-              error: "至少需要提供一个搜索条件：namePattern、componentType 或 pathPattern"
-            }, null, 2)
-          }],
-          isError: true
-        };
-      }
+              data: {
+                results: [],
+                total: 0,
+                hasMore: false,
+                query,
+              },
+              errors: ["至少需要提供一个搜索条件：namePattern、componentType 或 pathPattern"],
+            };
+          }
 
-      const result = await searchNodes({
-        namePattern,
-        componentType,
-        pathPattern,
-        limit: Math.min(limit, 100),
-        offset: Math.max(offset, 0)
-      });
+          const result = await searchNodes(request, {
+            namePattern,
+            componentType,
+            pathPattern,
+            limit: Math.min(limit, 100),
+            offset: Math.max(offset, 0),
+          });
 
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            success: true,
-            ...result,
-            query: { namePattern, componentType, pathPattern, limit, offset }
-          }, null, 2)
-        }]
-      };
-    }
+          return {
+            data: {
+              ...result,
+              query,
+            },
+            warnings: result.total === 0 ? ["No nodes found matching the provided filters"] : [],
+          };
+        }
+      )
   );
 }
