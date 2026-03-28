@@ -265,6 +265,7 @@ For exact parameter signatures, return types, and usage examples, read the corre
 | Open / save / close scenes & undo | `references/07-scene-management.md` |
 | Execute scene scripts & component methods | `references/08-script-execution.md` |
 | Gizmo tools, viewport & 2D/3D toggle | `references/09-viewport-gizmo.md` |
+| Capture reusable lessons from development / review / debug / verification | `references/12-experience-capture.md` |
 | Selection operations & project settings | `references/10-selection-and-project.md` |
 | Definitions (schema/type hints) | `references/11-definitions.md` |
 
@@ -350,3 +351,13 @@ Component properties use `__comps__.{index}.{property}` path format, where index
 7. **Use high-level tools first**: Prefer `/skill/create-nodes`, `/skill/modify-nodes` over raw `editor_request` — they handle serialization and error recovery.
 8. **Fallback to `editor_request`**: For operations not covered by high-level tools (e.g., `focus-camera`, `duplicate-node`, asset-db queries), use the editor request gateway.
 9. **Gated actions**: Destructive operations (`delete_nodes`, `clear_scene`, etc.) require two-step approval. Always handle the token flow.
+
+<!-- cocos-skill:experience:start -->
+## Experience Capture
+
+Capture reusable, verified lessons from development, review, debugging, and validation.
+
+- Keep short rules here; move long rationale, commands, and examples to `references/12-experience-capture.md`.
+- Use this schema: `Title`, `Signal`, `Root Cause / Constraints`, `Correct Approach`, `Verification`, `Scope`.
+- Skip guesses, one-off noise, and branch-local details.
+<!-- cocos-skill:experience:end -->

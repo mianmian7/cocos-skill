@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { SkillServerConfig, DEFAULT_SERVER_CONFIG } from './config.js';
+import { syncSkillTemplateFile } from './skill-template-sync.js';
 
 /**
  * Configuration storage manager for persisting skill server settings.
@@ -70,6 +71,17 @@ export class ConfigStorage {
             }
 
             if (!entry.isFile()) {
+                continue;
+            }
+
+            if (entry.name === 'SKILL.md') {
+                const result = syncSkillTemplateFile(sourcePath, targetPath);
+                if (result === 'copied') {
+                    console.log(`Copied skill template file: ${targetPath}`);
+                }
+                if (result === 'updated') {
+                    console.log(`Updated managed skill section: ${targetPath}`);
+                }
                 continue;
             }
 
