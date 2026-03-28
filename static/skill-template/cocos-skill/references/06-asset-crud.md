@@ -1,368 +1,85 @@
-# 06 — 资源创建、修改、删除、导入
-
-> **通道**: `asset-db` | **模式**: 读写（会修改项目资源）
-
-## 命令一览
-
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `create-asset` | 创建资源 | `[url, content, options?]` |
-| `save-asset` | 保存资源内容 | `[urlOrUuid, content]` |
-| `save-asset-meta` | 保存资源元数据 | `[urlOrUuid, metaJsonString]` |
-| `copy-asset` | 复制资源 | `[sourceUrl, targetUrl, options?]` |
-| `move-asset` | 移动/重命名资源 | `[sourceUrl, targetUrl, options?]` |
-| `delete-asset` | 删除资源 | `[urlOrUuid]` |
-| `refresh-asset` | 刷新资源 | `[urlOrUuid]` |
-| `reimport-asset` | 重新导入资源 | `[urlOrUuid]` |
-| `import-asset` | 从外部文件导入 | `[sourcePath, targetUrl, options?]` |
-| `open-asset` | 在编辑器中打开 | `[urlOrUuid]` |
-
----
-
-## 命令详情
-
-### `create-asset`
-
-创建资源。
-
-```typescript
-// 参数
-[url: string, content: string | Buffer | null, options?: {
-  overwrite?: boolean,  // 强制覆盖已有文件
-  rename?: boolean      // 自动重命名避免冲突
-}]
-
-// 官方类型: AssetOperationOption
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-// 创建 JSON 配置文件
-editor_request({
-  channel: "asset-db",
-  command: "create-asset",
-  args: [
-    "db://assets/configs/game-config.json",
-    JSON.stringify({ version: "1.0.0", difficulty: "normal" }),
-    { overwrite: false }
-  ]
-})
-
-// 创建 TypeScript 脚本
-editor_request({
-  channel: "asset-db",
-  command: "create-asset",
-  args: [
-    "db://assets/scripts/GameManager.ts",
-    `import { _decorator, Component } from 'cc';\nconst { ccclass } = _decorator;\n\n@ccclass('GameManager')\nexport class GameManager extends Component {\n    start() {}\n}`,
-    { overwrite: false }
-  ]
-})
-
-// 创建空目录
-editor_request({
-  channel: "asset-db",
-  command: "create-asset",
-  args: ["db://assets/new-folder", null]
-})
-```
-
----
-
-### `save-asset`
-
-保存资源内容（覆盖已有内容）。
-
-```typescript
-// 参数
-[urlOrUuid: string, content: string | Buffer]
-
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "asset-db",
-  command: "save-asset",
-  args: [
-    "db://assets/configs/game-config.json",
-    JSON.stringify({ version: "1.1.0", difficulty: "hard" })
-  ]
-})
-```
-
----
-
-### `save-asset-meta`
-
-保存资源元数据（导入设置等）。
-
-```typescript
-// 参数
-[urlOrUuid: string, metaJsonString: string]
-
-// 返回值
-AssetInfo | null
-```
-
-> **注意：** `metaJsonString` 必须是 **JSON 字符串**格式。先用 `query-asset-meta` 获取当前 meta，修改后用 `JSON.stringify` 转回字符串。
-
-**示例：**
-```typescript
-// 1. 获取当前 meta
-const meta = await editor_request({
-  channel: "asset-db",
-  command: "query-asset-meta",
-  args: ["db://assets/textures/icon.png"]
-});
-
-// 2. 修改 meta 并保存
-const updatedMeta = { ...meta.data.result, /* 修改的字段 */ };
-await editor_request({
-  channel: "asset-db",
-  command: "save-asset-meta",
-  args: ["db://assets/textures/icon.png", JSON.stringify(updatedMeta)]
-});
-```
-
----
-
-### `copy-asset`
-
-复制资源。
-
-```typescript
-// 参数
-[sourceUrl: string, targetUrl: string, options?: {
-  overwrite?: boolean,
-  rename?: boolean
-}]
-
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "asset-db",
-  command: "copy-asset",
-  args: [
-    "db://assets/textures/icon.png",
-    "db://assets/textures/icon-copy.png"
-  ]
-})
-```
-
----
-
-### `move-asset`
-
-移动/重命名资源。
-
-```typescript
-// 参数
-[sourceUrl: string, targetUrl: string, options?: {
-  overwrite?: boolean,
-  rename?: boolean
-}]
-
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-// 重命名
-editor_request({
-  channel: "asset-db",
-  command: "move-asset",
-  args: [
-    "db://assets/textures/old-name.png",
-    "db://assets/textures/new-name.png"
-  ]
-})
-
-// 移动到另一个目录
-editor_request({
-  channel: "asset-db",
-  command: "move-asset",
-  args: [
-    "db://assets/textures/icon.png",
-    "db://assets/ui/icons/icon.png"
-  ]
-})
-```
-
----
-
-### `delete-asset`
-
-删除资源。
-
-```typescript
-// 参数
-[urlOrUuid: string]
-
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "asset-db",
-  command: "delete-asset",
-  args: ["db://assets/textures/unused.png"]
-})
-```
-
----
-
-### `refresh-asset`
-
-刷新资源（当外部文件被修改时，通知编辑器重新读取）。
-
-```typescript
-// 参数
-[urlOrUuid: string]
-
-// 返回值
-void
-```
-
----
-
-### `reimport-asset`
-
-重新导入资源（强制重新执行导入流程）。
-
-```typescript
-// 参数
-[urlOrUuid: string]
-
-// 返回值
-void
-```
-
----
-
-### `import-asset`
-
-从外部文件系统导入资源到项目中。
-
-```typescript
-// 参数
-[sourcePath: string, targetUrl: string, options?: {
-  overwrite?: boolean,
-  rename?: boolean
-}]
-
-// 返回值
-AssetInfo | null
-```
-
-**示例：**
-```typescript
-// 从文件系统导入图片
-editor_request({
-  channel: "asset-db",
-  command: "import-asset",
-  args: [
-    "/Users/dev/Downloads/texture.png",
-    "db://assets/textures/imported-texture.png"
-  ]
-})
-```
-
----
-
-### `open-asset`
-
-在默认编辑器中打开资源。
-
-```typescript
-// 参数
-[urlOrUuid: string]
-
-// 返回值
-void
-```
-
----
-
-## 常见用法模式
-
-### 模式 1：创建脚本并刷新
-
-```typescript
-// 1. 创建脚本文件
-await editor_request({
-  channel: "asset-db",
-  command: "create-asset",
-  args: [
-    "db://assets/scripts/EnemyAI.ts",
-    scriptContent,
-    { overwrite: false }
-  ]
-});
-
-// 2. 等待导入完成后刷新
-await editor_request({
-  channel: "asset-db",
-  command: "refresh-asset",
-  args: ["db://assets/scripts/EnemyAI.ts"]
-});
-```
-
-### 模式 2：安全覆盖资源
-
-```typescript
-// 先查询是否存在
-const info = await editor_request({
-  channel: "asset-db",
-  command: "query-asset-info",
-  args: ["db://assets/configs/settings.json"]
-});
-
-if (info.data.result) {
-  // 存在则保存
-  await editor_request({
-    channel: "asset-db",
-    command: "save-asset",
-    args: ["db://assets/configs/settings.json", newContent]
-  });
-} else {
-  // 不存在则创建
-  await editor_request({
-    channel: "asset-db",
-    command: "create-asset",
-    args: ["db://assets/configs/settings.json", newContent]
-  });
-}
-```
-
-### 模式 3：批量整理资源目录
-
-```typescript
-// 创建目标目录
-await editor_request({
-  channel: "asset-db",
-  command: "create-asset",
-  args: ["db://assets/organized/textures", null]
-});
-
-// 移动资源到新目录
-await editor_request({
-  channel: "asset-db",
-  command: "move-asset",
-  args: [
-    "db://assets/scattered-texture.png",
-    "db://assets/organized/textures/scattered-texture.png"
-  ]
-});
-```
+# 06 — Asset Create, Update, Delete, And Import
+
+> **Channel**: `asset-db` | **Mode**: read/write
+## When to Use
+
+- You need to create, overwrite, copy, move, or import assets.
+- You need to modify asset content or meta.
+- You need to refresh, reimport, or open assets in the editor.
+
+## Default Rules
+
+All write operations should follow this sequence by default:
+
+1. Query source and target first
+2. Decide the conflict strategy explicitly
+3. Execute the write
+4. Run `refresh-asset` or `reimport-asset` when needed
+5. Read back to verify
+
+## Quick Flow
+
+### Create Or Update A File
+
+1. `query-asset-info(target)`
+2. If it exists, use `save-asset`
+3. If it does not exist, use `create-asset`
+4. Call `query-asset-info` again
+
+### Copy Or Move Assets
+
+1. `query-asset-info(source)`
+2. `query-asset-info(target)`
+3. Decide `overwrite` / `rename`
+4. `copy-asset` or `move-asset`
+5. Read back the target
+
+### Modify Meta
+
+1. `query-asset-meta`
+2. Change only the fields you actually need
+3. `JSON.stringify(...)`
+4. `save-asset-meta`
+5. Run `reimport-asset` when needed
+
+## Core Commands
+
+| Command | Use Case | Returns | Notes |
+|------|----------|------|------|
+| `create-asset` | Create a new file or directory | `AssetInfo \| null` | Can use `overwrite` / `rename` |
+| `save-asset` | Overwrite existing content | `AssetInfo \| null` | Supports text and binary |
+| `save-asset-meta` | Change importer meta | `AssetInfo \| null` | Second arg must be a JSON string |
+| `copy-asset` | Copy an asset | `AssetInfo \| null` | Query target conflicts first |
+| `move-asset` | Move or rename an asset | `AssetInfo \| null` | Changes reference-path chains |
+| `import-asset` | Import from an external path | `AssetInfo \| null` | Often followed by refresh |
+| `refresh-asset` | Refresh the asset database | `void` | Common after writes |
+| `reimport-asset` | Reimport an asset | `void` | Common after meta changes |
+| `open-asset` | Open an asset in the editor | `void` | More of a UI action |
+| `delete-asset` | Delete an asset directly | `AssetInfo \| null` | Prefer `apply_gated_action` for high-risk deletes |
+
+## Signature Cheat Sheet
+
+- `create-asset`: `args = [url: string, content: string | Buffer | null, options?: { overwrite?: boolean, rename?: boolean }]`
+- `import-asset`: `args = [sourcePath: string, targetUrl: string, options?: { overwrite?: boolean, rename?: boolean }]`
+- `copy-asset` / `move-asset`: `args = [sourceUrl: string, targetUrl: string, options?: { overwrite?: boolean, rename?: boolean }]`
+- `save-asset`: `args = [urlOrUuid: string, content: string | Buffer]`
+- `save-asset-meta`: `args = [urlOrUuid: string, metaJsonString: string]`
+- `delete-asset` / `refresh-asset` / `reimport-asset`: `args = [urlOrUuid: string]`
+
+## Common Pitfalls
+
+- `save-asset-meta` expects a JSON string, not an object.
+- `copy-asset` / `move-asset` failures usually mean the source is missing or target conflicts were not handled first.
+- After file writes, asset-db refresh lag can briefly hide the new state from subsequent reads.
+- Do not default to raw `delete-asset` for bulk deletes; use approval flow for high-risk cases.
+
+## Verification
+
+- After create / save: `query-asset-info`
+- After move / copy: query both source and target
+- After meta edits: `query-asset-meta`, plus `reimport-asset` when needed
+
+## Cross References
+
+- Preflight and dependency analysis: `references/05-asset-query.md`
+- Scene operations: `references/07-scene-management.md`

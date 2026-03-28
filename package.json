@@ -12,6 +12,7 @@
         "build:tsc": "npx tsc",
         "build:watch": "npx tsc --watch",
         "package": "node scripts/package.mjs",
+        "qa:skill-template": "node scripts/qa/validate-skill-template.mjs",
         "qa:no-legacy": "node scripts/qa/assert-no-legacy-identifiers.mjs"
     },
     "description": "cocos-skill extension with HTTP REST API and Python CLI for Cocos Creator",

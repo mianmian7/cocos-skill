@@ -1,141 +1,58 @@
-# 08 — 脚本执行与组件方法调用
+# 08 — Scene Script And Component Method Execution
 
-> **通道**: `scene` | **模式**: 执行（可产生任意副作用）
+> **Channel**: `scene` | **Mode**: execute
+## When to Use
 
-## 命令一览
+- You need to call a registered scene script method.
+- You need to call a public method on a component instance.
+- High-level tools cannot express the behavior, but you already know the method name, args, and target object.
 
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `execute-scene-script` | 执行场景脚本方法 | `[ExecuteSceneScriptMethodOptions]` |
-| `execute-component-method` | 执行组件方法 | `[ExecuteComponentMethodOptions]` |
+## Default Rules
 
----
+- Use this path only for registered methods.
+- If the real goal is arbitrary code execution, prefer the high-level `execute_scene_code` tool.
+- Re-confirm live node / component UUIDs before execution.
 
-## 命令详情
+## Core Commands
 
-### `execute-scene-script`
+| Command | Use Case | Key Args | Returns |
+|------|----------|----------|------|
+| `execute-scene-script` | Call a scene script method | `{ name, method, args }` | `any` |
+| `execute-component-method` | Call a component instance method | `{ uuid, name, args }` | `any` |
 
-在场景上下文中执行注册的脚本方法。脚本需要通过 Cocos Creator 的场景脚本机制注册。
+## Signature Cheat Sheet
 
-```typescript
-// 参数
-[{
-  name: string,   // 脚本名称（在 contributions.scene.script 中注册的）
-  method: string, // 方法名
-  args: any[]     // 参数数组
-}]
+- `execute-scene-script`: `args = [{ name: string, method: string, args: any[] }] -> any`
+- `execute-component-method`: `args = [{ uuid: string, name: string, args: any[] }] -> any`
+- Scene scripts use the `method` field for the method name; component calls do not.
 
-// 官方类型: ExecuteSceneScriptMethodOptions
-// 返回值
-any  // 方法返回值
-```
+## Quick Flow
 
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "execute-scene-script",
-  args: [{
-    name: "cocos-skill",
-    method: "queryNodeWorldPosition",
-    args: ["node-uuid"]
-  }]
-})
-```
+### Call A Scene Script
 
----
+1. Confirm that the script name and method name are registered and callable
+2. Pass the minimum required args
+3. Read back either the return value or the scene state immediately after execution
 
-### `execute-component-method`
+### Call A Component Method
 
-直接在指定组件实例上调用方法。
+1. Start with `query-node`
+2. Get the component UUID from `__comps__`
+3. `execute-component-method`
+4. Re-query node or component state
 
-```typescript
-// 参数
-[{
-  uuid: string,   // 组件 UUID（不是节点 UUID）
-  name: string,   // 方法名
-  args: any[]     // 参数数组
-}]
+## Common Pitfalls
 
-// 官方类型: ExecuteComponentMethodOptions
-// 返回值
-any  // 方法返回值
-```
+- `execute-component-method.uuid` is a component UUID, not a node UUID.
+- These calls can have side effects, so do not treat them as read-only queries.
+- “Can execute” is not the same as “should execute”; if a high-level tool can express the action, prefer that route.
 
-**示例：**
-```typescript
-// 调用组件上的自定义方法
-editor_request({
-  channel: "scene",
-  command: "execute-component-method",
-  args: [{
-    uuid: "component-uuid",
-    name: "resetHealth",
-    args: [100]
-  }]
-})
-```
+## Verification
 
-> **注意：** `uuid` 必须是**组件的 UUID**，不是节点的 UUID。先用 `query-node` 获取节点 dump，从 `__comps__` 中找到目标组件的 UUID。
+- If the return value itself is meaningful, inspect it first
+- If scene or component state changes, re-run `query-node`, `query-components`, or `context`
 
----
+## Cross References
 
-## 常见用法模式
-
-### 模式 1：通过场景脚本查询运行时数据
-
-```typescript
-// 场景脚本可以访问场景中的运行时对象
-const result = await editor_request({
-  channel: "scene",
-  command: "execute-scene-script",
-  args: [{
-    name: "cocos-skill",
-    method: "getSceneInfo",
-    args: []
-  }]
-});
-```
-
-### 模式 2：调用组件方法修改游戏状态
-
-```typescript
-// 1. 查询节点获取组件 UUID
-const node = await editor_request({
-  channel: "scene",
-  command: "query-node",
-  args: ["player-node-uuid"]
-});
-
-// 2. 从 dump 中找到目标组件的 UUID
-// （假设已从 node.__comps__ 中提取到 component UUID）
-
-// 3. 调用组件方法
-await editor_request({
-  channel: "scene",
-  command: "execute-component-method",
-  args: [{
-    uuid: "player-controller-component-uuid",
-    name: "setSpeed",
-    args: [10.0]
-  }]
-});
-```
-
-### 模式 3：批量执行场景脚本操作
-
-```typescript
-// 使用场景脚本执行复杂的批量操作
-const results = await editor_request({
-  channel: "scene",
-  command: "execute-scene-script",
-  args: [{
-    name: "cocos-skill",
-    method: "batchUpdateNodes",
-    args: [
-      ["uuid-1", "uuid-2", "uuid-3"],
-      { visible: false }
-    ]
-  }]
-});
-```
+- Node and component lookup: `references/01-node-query.md`
+- Component operations: `references/04-component-operations.md`

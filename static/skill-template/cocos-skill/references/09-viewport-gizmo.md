@@ -1,326 +1,59 @@
-# 09 — Gizmo/视口/2D-3D 切换
+# 09 — Gizmo, Viewport, And 2D/3D State
 
-> **通道**: `scene` | **模式**: 读写（影响编辑器视口状态）
+> **Channel**: `scene` | **Mode**: read/write
+## When to Use
 
-## 命令一览
+- You need to read or change the current Gizmo tool, pivot, coordinate space, or 2D/3D state.
+- You need to focus the viewport or align the view with nodes.
 
-### 查询命令
+## Core Commands
 
-| 命令 | 说明 | 返回值 |
-|------|------|--------|
-| `query-gizmo-tool-name` | 当前 Gizmo 工具 | `"move" \| "rotate" \| "scale" \| "rect"` |
-| `query-gizmo-pivot` | 当前轴心模式 | `"pivot" \| "center"` |
-| `query-gizmo-coordinate` | 当前坐标系模式 | `"local" \| "global"` |
-| `query-is2D` | 是否 2D 模式 | `boolean` |
-| `query-is-grid-visible` | 网格是否可见 | `boolean` |
+| Command | Use Case | Returns | Notes |
+|------|----------|------|------|
+| `query-gizmo-tool-name` | Read the current tool | `string` | `move` / `rotate` / `scale` / `rect` |
+| `change-gizmo-tool` | Change the current tool | `void` | Changes editor view state |
+| `query-gizmo-pivot` / `change-gizmo-pivot` | Read or change pivot mode | `string` / `void` | `pivot` / `center` |
+| `query-gizmo-coordinate` / `change-gizmo-coordinate` | Read or change coordinate mode | `string` / `void` | `local` / `global` |
+| `query-is2D` / `change-is2D` | Read or change 2D mode | `boolean` / `void` | Affects editor mode |
+| `query-is-grid-visible` / `set-grid-visible` | Read or change grid visibility | `boolean` / `void` | View state only |
+| `focus-camera` | Focus the camera on nodes | `void` | Arg is `string[]` |
+| `align-with-view` / `align-view-with-node` | Align nodes or view | `void` | Affects the current view or selected node |
 
-### 设置命令
+## Signature Cheat Sheet
 
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `change-gizmo-tool` | 切换 Gizmo 工具 | `[toolName]` |
-| `change-gizmo-pivot` | 切换轴心模式 | `[pivot]` |
-| `change-gizmo-coordinate` | 切换坐标系 | `[coordinate]` |
-| `change-is2D` | 切换 2D/3D 模式 | `[is2D]` |
-| `set-grid-visible` | 设置网格可见性 | `[visible]` |
-| `focus-camera` | 聚焦摄像机到节点 | `[uuids[]]` |
-| `align-with-view` | 节点对齐到视图 | `[]` |
-| `align-view-with-node` | 视图对齐到节点 | `[]` |
+- `change-gizmo-tool`: `args = [tool: string]`; common values are `move | rotate | scale | rect`
+- `change-gizmo-pivot`: `args = [pivot: string]`; common values are `pivot | center`
+- `change-gizmo-coordinate`: `args = [coordinate: string]`; common values are `local | global`
+- `change-is2D` / `set-grid-visible`: `args = [boolean]`
+- `focus-camera`: `args = [string[]]`
+- `align-with-view` / `align-view-with-node`: `args = []`
 
----
+## Quick Flow
 
-## 命令详情
+### Focus On A Target Node
 
-### `query-gizmo-tool-name`
+1. Confirm the target node UUID first
+2. `focus-camera([uuid])`
+3. Re-check mode or tool state only if needed
 
-查询当前 Gizmo 工具名称。
+### Switch To 2D Editing Mode
 
-```typescript
-// 参数
-[]
+1. `query-is2D`
+2. Call `change-is2D(true)` only if a change is required
+3. Query again if confirmation matters
 
-// 返回值
-string  // "move" | "rotate" | "scale" | "rect"
-```
+## Common Pitfalls
 
----
+- These commands mainly change editor view state; they do not automatically mean scene data changed.
+- `focus-camera` expects a UUID array, not a single string.
+- Do not treat viewport changes as business-state validation; real scene verification still needs node or component reads.
 
-### `change-gizmo-tool`
+## Verification
 
-切换 Gizmo 工具。
+- For mode changes: query again with the matching `query-*`
+- For focus or alignment changes: inspect live viewport behavior, but use separate readback for scene data changes
 
-```typescript
-// 参数
-[toolName: string]  // "move" | "rotate" | "scale" | "rect"
+## Cross References
 
-// 返回值
-void
-```
-
-**示例：**
-```typescript
-// 切换到旋转工具
-editor_request({
-  channel: "scene",
-  command: "change-gizmo-tool",
-  args: ["rotate"]
-})
-```
-
----
-
-### `query-gizmo-pivot`
-
-查询当前 Gizmo 轴心模式。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-string  // "pivot" | "center"
-```
-
----
-
-### `change-gizmo-pivot`
-
-切换 Gizmo 轴心模式。
-
-```typescript
-// 参数
-[pivot: string]  // "pivot" | "center"
-
-// 返回值
-void
-```
-
----
-
-### `query-gizmo-coordinate`
-
-查询当前 Gizmo 坐标系模式。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-string  // "local" | "global"
-```
-
----
-
-### `change-gizmo-coordinate`
-
-切换 Gizmo 坐标系。
-
-```typescript
-// 参数
-[coordinate: string]  // "local" | "global"
-
-// 返回值
-void
-```
-
----
-
-### `query-is2D`
-
-查询当前是否为 2D 编辑模式。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-boolean
-```
-
----
-
-### `change-is2D`
-
-切换 2D/3D 编辑模式。
-
-```typescript
-// 参数
-[is2D: boolean]
-
-// 返回值
-void
-```
-
-**示例：**
-```typescript
-// 切换到 2D 模式
-editor_request({
-  channel: "scene",
-  command: "change-is2D",
-  args: [true]
-})
-```
-
----
-
-### `query-is-grid-visible`
-
-查询网格是否可见。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-boolean
-```
-
----
-
-### `set-grid-visible`
-
-设置网格可见性。
-
-```typescript
-// 参数
-[visible: boolean]
-
-// 返回值
-void
-```
-
----
-
-### `focus-camera`
-
-聚焦摄像机到指定节点。
-
-```typescript
-// 参数
-[uuids: string[]]  // 节点 UUID 数组
-
-// 返回值
-void
-```
-
-**示例：**
-```typescript
-// 聚焦到单个节点
-editor_request({
-  channel: "scene",
-  command: "focus-camera",
-  args: [["target-node-uuid"]]
-})
-
-// 聚焦到多个节点（视图会包含所有节点）
-editor_request({
-  channel: "scene",
-  command: "focus-camera",
-  args: [["node-1", "node-2", "node-3"]]
-})
-```
-
----
-
-### `align-with-view`
-
-将选中节点对齐到当前视图（节点的 transform 会匹配当前摄像机视角）。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-void
-```
-
-> **前提：** 需要先用 `selection.select` 选中节点。
-
----
-
-### `align-view-with-node`
-
-将视图对齐到选中节点（摄像机会移动到节点位置）。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-void
-```
-
-> **前提：** 需要先用 `selection.select` 选中节点。
-
----
-
-## 常见用法模式
-
-### 模式 1：为 2D 项目配置视口
-
-```typescript
-// 切换到 2D 模式
-await editor_request({
-  channel: "scene",
-  command: "change-is2D",
-  args: [true]
-});
-
-// 使用矩形工具
-await editor_request({
-  channel: "scene",
-  command: "change-gizmo-tool",
-  args: ["rect"]
-});
-
-// 隐藏网格
-await editor_request({
-  channel: "scene",
-  command: "set-grid-visible",
-  args: [false]
-});
-```
-
-### 模式 2：聚焦到目标节点并对齐视图
-
-```typescript
-// 1. 聚焦摄像机
-await editor_request({
-  channel: "scene",
-  command: "focus-camera",
-  args: [["target-node-uuid"]]
-});
-
-// 2. 选中节点（可配合 align 命令）
-await editor_request({
-  channel: "selection",
-  command: "select",
-  args: ["node", ["target-node-uuid"]]
-});
-```
-
-### 模式 3：查询并恢复视口状态
-
-```typescript
-// 保存当前状态
-const tool = await editor_request({
-  channel: "scene", command: "query-gizmo-tool-name", args: []
-});
-const pivot = await editor_request({
-  channel: "scene", command: "query-gizmo-pivot", args: []
-});
-const coord = await editor_request({
-  channel: "scene", command: "query-gizmo-coordinate", args: []
-});
-const is2D = await editor_request({
-  channel: "scene", command: "query-is2D", args: []
-});
-
-// ... 执行操作 ...
-
-// 恢复状态
-await editor_request({ channel: "scene", command: "change-gizmo-tool", args: [tool.data.result] });
-await editor_request({ channel: "scene", command: "change-gizmo-pivot", args: [pivot.data.result] });
-await editor_request({ channel: "scene", command: "change-gizmo-coordinate", args: [coord.data.result] });
-await editor_request({ channel: "scene", command: "change-is2D", args: [is2D.data.result] });
-```
+- Node lookup: `references/01-node-query.md`
+- Selection and project settings: `references/10-selection-and-project.md`

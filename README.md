@@ -19,7 +19,8 @@
   - `.claude/skills/cocos-skill/SKILL.md`
   - `.codex/skills/cocos-skill/SKILL.md`
   - `.agent/skills/cocos-skill/SKILL.md`
-  - 包含 `references/*` 文件（仅在缺失时复制）
+  - `SKILL.md` 的受管主体会自动更新，同时保留项目本地 `Project Notes` 备注块
+  - `references/*` 等模板文件会按 bundled 版本刷新
   - 模板来源：`static/skill-template/cocos-skill/`
 
 ## 不会生成的内容
@@ -27,6 +28,19 @@
 - 不会生成旧版协议配置文件
 - 当前仓库不包含旧版 Python CLI 脚本
 - Skill 模板引导不依赖外部安装器
+
+## Skill 模板维护参考
+
+- 这一节只用于维护 `static/skill-template/cocos-skill/` 时追溯来源，不会同步进打包后的 skill 内容。
+- 根目录 `@cocos/` 目前是本地参考副本；当前 `.gitignore` 忽略它，默认 `npm run package` 也不会把它放进发布 zip。
+
+| 模板主题 | 维护期核对来源 |
+|---|---|
+| `references/01` `02` `03` `04` `07` `08` `09` | `@cocos/creator-types/editor/packages/scene/@types/message.d.ts`；涉及 option / dump 结构时再看 `@cocos/creator-types/editor/packages/scene/@types/public.d.ts` |
+| `references/05` `06` | `@cocos/creator-types/editor/packages/asset-db/@types/message.d.ts`；涉及 `QueryAssetsOption` / `AssetOperationOption` / `IAssetInfo` 时再看 `@cocos/creator-types/editor/packages/asset-db/@types/public.d.ts` |
+| `references/10` | `selection` 看 `@cocos/creator-types/editor/editor.d.ts` 里的 `Editor.Selection`；`project` 看 `@cocos/creator-types/editor/packages/project/@types/message.d.ts` 与 `index.d.ts`；`preferences` 看 `@cocos/creator-types/editor/packages/preferences/@types/message.d.ts` 与 `index.d.ts` |
+| `references/11` | 仓库内工具实现：`source/skill/tools/get-node-definitions.ts`、`source/skill/tools/get-component-definitions.ts` |
+| `editor_request` 白名单与运行时适配 | `source/skill/tools/editor-request-schemas.ts`、`source/skill/tools/editor-request-support.ts` |
 
 ## 快速开始
 
@@ -118,6 +132,7 @@ npm install
 npm run build
 npm run build:watch
 npm run build:tsc
+npm run qa:skill-template
 ```
 
 ### 架构

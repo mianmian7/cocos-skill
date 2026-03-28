@@ -1,238 +1,69 @@
-# 07 — 场景打开/保存/关闭 + Undo
+# 07 — Scene Open, Save, Close, And Snapshots
 
-> **通道**: `scene` | **模式**: 读写（会影响场景状态）
+> **Channel**: `scene` | **Mode**: read/write
+## When to Use
 
-## 命令一览
+- You need to open, save, or close scenes.
+- You need a rollback point before batch scene edits.
+- You need to handle dirty state before switching scenes.
 
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `open-scene` | 打开场景 | `[sceneAssetUuid]` |
-| `save-scene` | 保存当前场景 | `[]` 或 `[saveAs?]` |
-| `save-as-scene` | 另存为场景 | `[]` |
-| `close-scene` | 关闭当前场景 | `[]` |
-| `snapshot` | 创建 Undo 快照 | `[]` |
-| `snapshot-abort` | 取消 Undo 快照 | `[]` |
-| `soft-reload` | 软重载场景 | `[]` |
+## Default Choice
 
----
+Preferred order:
 
-## 命令详情
+1. High-level tool `operate_current_scene`
+2. Use the `editor_request` commands on this page only when the high-level tool is not enough
 
-### `open-scene`
+## Quick Flow
 
-打开场景。传入场景资源的 UUID。
+### Switch Scenes
 
-```typescript
-// 参数
-[sceneAssetUuid: string]
+1. `query-dirty`
+2. Save first if dirty
+3. Use `query-uuid` to get the target scene asset UUID
+4. `open-scene`
+5. Verify with `context` or `query-dirty`
 
-// 返回值
-void
-```
+### Create A Rollback Point Before Batch Changes
 
-**示例：**
-```typescript
-// 先查询场景 UUID
-const sceneInfo = await editor_request({
-  channel: "asset-db",
-  command: "query-uuid",
-  args: ["db://assets/scenes/MainMenu.scene"]
-});
+1. `snapshot`
+2. Run the batch of edits
+3. Keep the snapshot if the batch succeeds and the user may need undo
+4. If the batch fails and should be discarded, call `snapshot-abort`
 
-// 打开场景
-editor_request({
-  channel: "scene",
-  command: "open-scene",
-  args: [sceneInfo.data.result]
-})
-```
+## Core Commands
 
----
+| Command | Use Case | Returns | Notes |
+|------|----------|------|------|
+| `open-scene` | Open a scene | `void` | Argument is the scene asset UUID |
+| `save-scene` | Save the current scene | `string \| undefined` | Passing `true` acts like save-as |
+| `save-as-scene` | Save as | `string \| undefined` | Opens UI; poor fit for no-UI automation |
+| `close-scene` | Close the current scene | `boolean` | Handle dirty state first |
+| `snapshot` | Create an undo snapshot | `void` | Recommended before batch edits |
+| `snapshot-abort` | Discard changes since the last snapshot | `void` | Used for failure rollback |
+| `soft-reload` | Soft-reload the scene | `void` | Refreshes state, not a full reopen |
 
-### `save-scene`
+## Signature Cheat Sheet
 
-保存当前场景。
+- `open-scene`: `args = [sceneAssetUuid: string] -> void`
+- `save-scene`: `args = [] | [saveAs?: boolean] -> string | undefined`
+- `save-as-scene`: `args = [] -> string | undefined`
+- `close-scene`: `args = [] -> boolean`
+- `snapshot` / `snapshot-abort` / `soft-reload`: `args = [] -> void`
 
-```typescript
-// 参数
-[] | [saveAs?: boolean]
+## Common Pitfalls
 
-// 返回值
-string | undefined  // 场景资源路径（保存成功时返回）
-```
+- `save-as-scene` opens a file dialog, so it is a poor fit for unattended automation.
+- Skipping `query-dirty` before scene switches is the easiest way to lose the current work state.
+- `snapshot` is not an automatic commit point; it exists for undo and rollback.
 
-**示例：**
-```typescript
-// 普通保存
-editor_request({
-  channel: "scene",
-  command: "save-scene",
-  args: []
-})
+## Verification
 
-// 另存为（等同于 save-as-scene）
-editor_request({
-  channel: "scene",
-  command: "save-scene",
-  args: [true]
-})
-```
+- After a scene switch: `context` / `query-dirty`
+- After saving: check the returned path or re-check dirty state
+- After rollback: re-query the key nodes or state you care about
 
----
+## Cross References
 
-### `save-as-scene`
-
-另存为场景（会弹出文件选择对话框）。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-string | undefined  // 新场景资源路径
-```
-
----
-
-### `close-scene`
-
-关闭当前场景。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-boolean
-```
-
----
-
-### `snapshot`
-
-创建 Undo 快照。在执行一组修改操作前调用，配合 `snapshot-abort` 可以实现原子性回滚。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-void
-```
-
-> **最佳实践：** 在批量修改前调用 `snapshot`，这样用户可以用 Ctrl+Z 一步撤销所有修改。
-
----
-
-### `snapshot-abort`
-
-取消 Undo 快照（丢弃自上次 snapshot 以来的所有更改）。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-void
-```
-
----
-
-### `soft-reload`
-
-软重载场景（不重新加载资源，只刷新场景状态）。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-void
-```
-
----
-
-## 常见用法模式
-
-### 模式 1：安全修改场景（带 Undo 支持）
-
-```typescript
-// 1. 创建快照点
-await editor_request({
-  channel: "scene",
-  command: "snapshot",
-  args: []
-});
-
-// 2. 执行一系列修改
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{ uuid: "node-1", path: "position", dump: { type: "cc.Vec3", value: { x: 100, y: 0, z: 0 } } }]
-});
-
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{ uuid: "node-2", path: "active", dump: { type: "Boolean", value: false } }]
-});
-
-// 用户可以通过 Ctrl+Z 一步撤销以上所有修改
-```
-
-### 模式 2：切换场景
-
-```typescript
-// 1. 检查当前场景是否需要保存
-const dirty = await editor_request({
-  channel: "scene",
-  command: "query-dirty",
-  args: []
-});
-
-// 2. 如有修改先保存
-if (dirty.data.result) {
-  await editor_request({
-    channel: "scene",
-    command: "save-scene",
-    args: []
-  });
-}
-
-// 3. 获取目标场景 UUID
-const targetScene = await editor_request({
-  channel: "asset-db",
-  command: "query-uuid",
-  args: ["db://assets/scenes/GameLevel1.scene"]
-});
-
-// 4. 打开新场景
-await editor_request({
-  channel: "scene",
-  command: "open-scene",
-  args: [targetScene.data.result]
-});
-```
-
-### 模式 3：修改失败时回滚
-
-```typescript
-// 1. 创建快照
-await editor_request({
-  channel: "scene",
-  command: "snapshot",
-  args: []
-});
-
-try {
-  // 2. 执行修改...
-  // (如果出错)
-} catch (error) {
-  // 3. 取消快照，回滚所有更改
-  await editor_request({
-    channel: "scene",
-    command: "snapshot-abort",
-    args: []
-  });
-}
-```
+- Node lifecycle: `references/02-node-lifecycle.md`
+- Asset queries: `references/05-asset-query.md`

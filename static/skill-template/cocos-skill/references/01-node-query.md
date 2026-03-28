@@ -1,226 +1,73 @@
-# 01 — 节点查询与检视
+# 01 — Node Query And Inspection
 
-> **通道**: `scene` | **模式**: 只读
+> **Channel**: `scene` | **Mode**: read-only
+## When to Use
 
-## 命令一览
+- You have just connected to the editor and need to confirm scene readiness or unsaved changes.
+- You need to re-locate nodes from the live scene instead of trusting stale UUIDs.
+- You need to find which nodes are using an asset UUID.
 
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `query-node` | 查询单个节点完整 dump | `[uuid]` |
-| `query-node-tree` | 查询节点树结构 | `[]` 或 `[rootUuid]` |
-| `query-nodes-by-asset-uuid` | 查找使用指定资源的节点 | `[assetUuid]` |
-| `query-dirty` | 场景是否有未保存更改 | `[]` |
-| `query-is-ready` | 场景编辑器是否就绪 | `[]` |
-| `query-scene-bounds` | 查询场景边界尺寸 | `[]` |
+## Quick Flow
 
----
+1. Start with `POST /skill/context` to inspect the current scene, selection, dirty state, and hierarchy summary.
+2. If you are calling `editor_request` directly, check `query-is-ready` first.
+3. For large scenes, prefer:
+   - `query-node-tree` with `maxDepth` / `maxNodes`
+   - or `search_nodes`
+4. After you have the target UUID, call `query-node` for the full dump.
+5. Re-query after changes to confirm the live state actually changed.
 
-## 命令详情
+## Core Commands
 
-### `query-node`
+| Command | Use Case | Returns | Notes |
+|------|----------|------|------|
+| `query-is-ready` | Health check before direct scene message calls | `boolean` | Do not continue with writes if it is not ready |
+| `query-dirty` | Check whether the current scene needs saving | `boolean` | Run this before scene switches |
+| `query-node-tree` | Inspect the tree or a subtree | `INode` | Limit `maxDepth` / `maxNodes` |
+| `query-node` | Read a full dump for one node | `INode` | Useful for component UUIDs and property-path context |
+| `query-nodes-by-asset-uuid` | Find nodes that reference an asset | `string[]` | Returns node UUIDs, not node details |
+| `query-scene-bounds` | Read the scene bounds | `{ x, y, width, height }` | Useful for layout and viewport work |
 
-查询单个节点的完整 dump 数据。
+## Signature Cheat Sheet
 
-```typescript
-// 参数
-[uuid: string]
+- `query-is-ready`: `args = [] -> boolean`
+- `query-node`: `args = [uuid: string] -> INode`
+- `query-node-tree`: `args = [] | [rootUuid: string] -> INode`
+- `query-nodes-by-asset-uuid`: `args = [assetUuid: string] -> string[]`
+- `query-dirty`: `args = [] -> boolean`
+- `query-scene-bounds`: `args = [] -> { x, y, width, height }`
 
-// 返回值
-INode  // 包含节点名称、transform、组件列表、子节点等完整信息
-```
+## Recommended Patterns
 
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "query-node",
-  args: ["abc123-node-uuid"]
-})
-```
+### Locate A Live Node
 
----
+1. `context` or `search_nodes`
+2. `query-node`
+3. If you need component UUIDs, inspect `__comps__`
 
-### `query-node-tree`
+### Decide Whether To Save Before A Scene Switch
 
-查询节点树结构。不传参数则返回整个场景树。
+1. `query-dirty`
+2. If dirty, save before switching
 
-```typescript
-// 参数
-[] | [rootUuid?: string]
+### Find Nodes From An Asset
 
-// 返回值
-INode  // 树形结构，包含子节点
-```
+1. `query-nodes-by-asset-uuid`
+2. Run `query-node` for each returned UUID
 
-**示例：**
-```typescript
-// 查询整个场景树
-editor_request({
-  channel: "scene",
-  command: "query-node-tree",
-  args: [],
-  maxDepth: 3,
-  maxNodes: 50
-})
+## Common Pitfalls
 
-// 查询指定节点的子树
-editor_request({
-  channel: "scene",
-  command: "query-node-tree",
-  args: ["parent-node-uuid"]
-})
-```
+- Do not run a full `query-node-tree` on large scenes unless you really need it; it can explode context size.
+- `query-nodes-by-asset-uuid` only returns UUIDs, so you still need `query-node` afterwards.
+- UUIDs from old chats go stale easily; re-search live nodes first.
 
----
+## Verification
 
-### `query-nodes-by-asset-uuid`
+- After reading a node, optionally re-run `context` or `search_nodes` to confirm it belongs to the current live scene.
+- For before/after comparisons, keep at least one fresh `query-node` or `query-dirty` readback.
 
-查找使用指定资源的所有节点 UUID。
+## Cross References
 
-```typescript
-// 参数
-[assetUuid: string]
-
-// 返回值
-string[]  // 使用该资源的节点 UUID 列表
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "query-nodes-by-asset-uuid",
-  args: ["image-asset-uuid"]
-})
-```
-
----
-
-### `query-dirty`
-
-检查当前场景是否有未保存的更改。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-boolean
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "query-dirty",
-  args: []
-})
-```
-
----
-
-### `query-is-ready`
-
-检查场景编辑器是否已就绪。在执行任何场景操作前建议先调用此命令。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-boolean
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "query-is-ready",
-  args: []
-})
-```
-
----
-
-### `query-scene-bounds`
-
-查询场景边界尺寸。
-
-```typescript
-// 参数
-[]
-
-// 返回值
-{ x: number, y: number, width: number, height: number }
-```
-
-**示例：**
-```typescript
-editor_request({
-  channel: "scene",
-  command: "query-scene-bounds",
-  args: []
-})
-```
-
----
-
-## 常见用法模式
-
-### 模式 1：检查场景状态后查询节点
-
-```typescript
-// 1. 确认场景就绪
-const ready = await editor_request({
-  channel: "scene", command: "query-is-ready", args: []
-});
-
-// 2. 获取场景树
-const tree = await editor_request({
-  channel: "scene",
-  command: "query-node-tree",
-  args: [],
-  maxDepth: 2,
-  maxNodes: 100
-});
-
-// 3. 查询具体节点详情
-const node = await editor_request({
-  channel: "scene",
-  command: "query-node",
-  args: ["target-uuid"]
-});
-```
-
-### 模式 2：查找使用某资源的所有节点
-
-```typescript
-// 1. 查找引用该图片的节点
-const nodeUuids = await editor_request({
-  channel: "scene",
-  command: "query-nodes-by-asset-uuid",
-  args: ["texture-uuid"]
-});
-
-// 2. 逐个查询详情
-for (const uuid of nodeUuids.data.result) {
-  const detail = await editor_request({
-    channel: "scene",
-    command: "query-node",
-    args: [uuid]
-  });
-}
-```
-
-### 模式 3：检查是否需要保存
-
-```typescript
-const dirty = await editor_request({
-  channel: "scene",
-  command: "query-dirty",
-  args: []
-});
-if (dirty.data.result) {
-  // 场景有未保存更改，提示用户或自动保存
-}
-```
+- Property writes: `references/03-node-properties.md`
+- Component inspection: `references/04-component-operations.md`
+- Scene save / switch: `references/07-scene-management.md`

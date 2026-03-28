@@ -16,7 +16,8 @@ cocos-skill is a Cocos Creator extension that runs an in-editor HTTP tool server
   - `.claude/skills/cocos-skill/SKILL.md`
   - `.codex/skills/cocos-skill/SKILL.md`
   - `.agent/skills/cocos-skill/SKILL.md`
-  - Includes `references/*` files (copied when missing)
+  - Updates the managed `SKILL.md` body while preserving the project-local `Project Notes` block
+  - Refreshes bundled `references/*` and other template files when the source changes
   - Template source is bundled in release: `static/skill-template/cocos-skill/`
 
 ## What It Does Not Generate
@@ -24,6 +25,19 @@ cocos-skill is a Cocos Creator extension that runs an in-editor HTTP tool server
 - No legacy protocol config file
 - No bundled Python CLI script in this repository
 - No external installer required for skill template bootstrap
+
+## Skill Template Maintenance Sources
+
+- This section exists for maintaining `static/skill-template/cocos-skill/`; it is not synced into the packaged skill content.
+- The repo-root `@cocos/` directory is currently a local reference copy. It is ignored by `.gitignore`, and `npm run package` does not include it in the release zip.
+
+| Template topic | Verified maintenance sources |
+|---|---|
+| `references/01` `02` `03` `04` `07` `08` `09` | `@cocos/creator-types/editor/packages/scene/@types/message.d.ts`; also `@cocos/creator-types/editor/packages/scene/@types/public.d.ts` when option or dump shapes matter |
+| `references/05` `06` | `@cocos/creator-types/editor/packages/asset-db/@types/message.d.ts`; also `@cocos/creator-types/editor/packages/asset-db/@types/public.d.ts` for `QueryAssetsOption`, `AssetOperationOption`, and `IAssetInfo` |
+| `references/10` | `selection` comes from `Editor.Selection` in `@cocos/creator-types/editor/editor.d.ts`; `project` uses `@cocos/creator-types/editor/packages/project/@types/message.d.ts` and `index.d.ts`; `preferences` uses `@cocos/creator-types/editor/packages/preferences/@types/message.d.ts` and `index.d.ts` |
+| `references/11` | In-repo tool implementations: `source/skill/tools/get-node-definitions.ts`, `source/skill/tools/get-component-definitions.ts` |
+| `editor_request` whitelist and runtime adaptation | `source/skill/tools/editor-request-schemas.ts`, `source/skill/tools/editor-request-support.ts` |
 
 ## Quick Start
 
@@ -115,6 +129,7 @@ npm install
 npm run build
 npm run build:watch
 npm run build:tsc
+npm run qa:skill-template
 ```
 
 ### Architecture

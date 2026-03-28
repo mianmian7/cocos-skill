@@ -1,55 +1,69 @@
-# Definitions (Schema / Type Hints)
+# 11 — Definitions (Property Paths And Type Hints)
 
-cocos-skill 提供了 definitions 端点，用于在修改前“先发现、再行动（discover then act）”，避免 AI 猜测属性路径/类型导致失败或误改。
+## When to Use
 
-## 组件 Definitions
+- Before any property write.
+- When you are unsure about the correct `path`, `type`, enum value, or visible field.
+- When you want to reduce bad writes caused by model guessing.
 
-Endpoint:
-- POST `/skill/definitions/components`
+## Default Flow
 
-Tool:
-- `get_component_definitions`
+1. Locate the target node or component UUID
+2. Call definitions
+3. Read `properties[].path` and `properties[].type` from the result
+4. Then call `modify_nodes`, `modify_components`, or `editor_request` if necessary
 
-Request:
-```json
-{
-  "componentUuids": ["<componentUuid>"] ,
-  "includeTooltips": true,
-  "hideInternalProps": true,
-  "includeTs": true
-}
-```
-
-Response (shape):
-- `components[].type`
-- `components[].properties[]: { path, type, tooltip?, enumValues? }`
-- `components[].ts` (when includeTs=true)
-
-Usage:
-1) Use `query_nodes` / `query_components` to get component UUIDs
-2) Call definitions to get valid property paths/types
-3) Use `modify_components` using those paths/types
-
-## 节点 Definitions
-
-Endpoint:
-- POST `/skill/definitions/nodes`
-
-Tool:
-- `get_node_definitions`
+## Node Definitions
 
 Request:
+
 ```json
 {
-  "nodeUuids": ["<nodeUuid>"] ,
+  "nodeUuids": ["<nodeUuid>"],
   "includeTooltips": false,
   "hideInternalProps": true,
   "includeTs": true
 }
 ```
 
-Notes:
-- 节点 dump 来自 `scene.query-node`。
-- `hideInternalProps=true`（默认）会过滤掉 `_`/`__` 等内部字段，输出更干净。
-- `hideInternalProps=false` 可用于排查/高级用法，会包含如 `__comps__.*`、`__children__.*` 等路径（数据量会明显增大）。
-- TS 片段用于提示词/代码模式输入，帮助 LLM 使用正确的 property path 与 type。
+Key response fields:
+
+- `nodes[].type`
+- `nodes[].properties[]: { path, type, tooltip?, enumValues? }`
+- `nodes[].ts`
+
+## Component Definitions
+
+Request:
+
+```json
+{
+  "componentUuids": ["<componentUuid>"],
+  "includeTooltips": true,
+  "hideInternalProps": true,
+  "includeTs": true
+}
+```
+
+Key response fields:
+
+- `components[].type`
+- `components[].properties[]: { path, type, tooltip?, enumValues? }`
+- `components[].ts`
+
+## Parameter Guidance
+
+- Use `hideInternalProps=true` by default so the result stays cleaner.
+- Consider `hideInternalProps=false` only when debugging deep internal fields.
+- `includeTs=true` is useful when generating code or constraining prompts.
+
+## Common Pitfalls
+
+- Definitions are not a write operation; they belong to the discovery phase.
+- Expand internal paths like `__comps__.*` or `__children__.*` only when you explicitly need them.
+- Definitions return available paths and type hints, not completed writes.
+
+## Cross References
+
+- Node properties: `references/03-node-properties.md`
+- Component operations: `references/04-component-operations.md`

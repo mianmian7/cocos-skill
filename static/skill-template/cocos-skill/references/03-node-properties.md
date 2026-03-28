@@ -1,315 +1,72 @@
-# 03 — 节点属性读写
+# 03 — Node Property Reads And Writes
 
-> **通道**: `scene` | **模式**: 读写
+> **Channel**: `scene` | **Mode**: read/write
+## When to Use
 
-## 命令一览
+- You need to change node transform, active state, name, hierarchy, or similar properties.
+- You need to change component properties that are not directly covered by high-level tools.
+- You need to reorder array properties or remove array elements.
 
-| 命令 | 说明 | 参数 |
-|------|------|------|
-| `set-property` | 设置节点/组件属性值 | `[SetPropertyOptions]` |
-| `reset-property` | 重置属性为默认值 | `[SetPropertyOptions]` |
-| `move-array-element` | 移动数组元素位置 | `[MoveArrayOptions]` |
-| `remove-array-element` | 移除数组元素 | `[RemoveArrayOptions]` |
+## Default Choice
 
----
+Preferred order:
 
-## 命令详情
+1. `get_node_definitions` / `get_component_definitions`
+2. `modify_nodes` / `modify_components`
+3. Use the `editor_request` commands on this page only when high-level tools are not enough
 
-### `set-property`
+Do not guess `path` or `dump.type`.
 
-设置节点/组件属性值。这是最常用的属性修改命令。
+## Quick Flow
 
-```typescript
-// 参数
-[{
-  uuid: string,     // 节点或组件的 UUID
-  path: string,     // 属性路径（见下方路径表）
-  dump: {           // 属性 dump 数据
-    type: string,   // 值类型（见下方类型表）
-    value: any      // 具体值
-  }
-}]
+1. Read definitions first to confirm valid `path` and `type`
+2. Apply the property write
+3. Use array commands only when you are modifying array fields
+4. Read back with `query-node`, `query-components`, or `context` immediately after the write
 
-// 官方类型: SetPropertyOptions
-// 返回值
-boolean
-```
+## Core Commands
 
-**示例：**
-```typescript
-// 设置位置
-editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "position",
-    dump: { type: "cc.Vec3", value: { x: 100, y: 200, z: 0 } }
-  }]
-})
+| Command | Use Case | Key Args | Returns |
+|------|----------|----------|------|
+| `set-property` | Write one node or component property | `SetPropertyOptions` | `boolean` |
+| `reset-property` | Reset a property to its default value | `SetPropertyOptions` | `boolean` |
+| `move-array-element` | Reorder an array element | `MoveArrayOptions` | `boolean` |
+| `remove-array-element` | Remove an array element | `RemoveArrayOptions` | `boolean` |
 
-// 设置节点名称
-editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "name",
-    dump: { type: "String", value: "NewName" }
-  }]
-})
+## Signature Cheat Sheet
 
-// 设置组件颜色
-editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "__comps__.0.color",
-    dump: { type: "cc.Color", value: { r: 255, g: 0, b: 0, a: 255 } }
-  }]
-})
-```
+- `set-property`: `args = [{ uuid, path, dump }] -> boolean`
+- `reset-property`: `args = [{ uuid, path, dump }] -> boolean`
+- `move-array-element`: `args = [{ uuid, path, target, offset }] -> boolean`
+- `remove-array-element`: `args = [{ uuid, path, index }] -> boolean`
+- `dump.type` must match the real definitions / dump type. Do not invent it.
 
----
+## Common Paths
 
-### `reset-property`
+| Path | Meaning | Common Type |
+|------|------|----------|
+| `position` | Node position | `cc.Vec3` |
+| `scale` | Node scale | `cc.Vec3` |
+| `eulerAngles` | Euler rotation | `cc.Vec3` |
+| `active` | Active state | `Boolean` |
+| `name` | Node name | `String` |
+| `__comps__.{index}.{property}` | Component property path | Read definitions first |
 
-重置属性为默认值。
+## Common Pitfalls
 
-```typescript
-// 参数
-[{
-  uuid: string,
-  path: string,
-  dump: IProperty  // 属性的 dump 数据
-}]
+- `uuid` points to the property owner; it can be either a node or a component.
+- `__comps__.0.xxx` is just an example. Real component indices are not guaranteed to be `0`.
+- `dump.type` must match the real dump type; do not invent one.
+- Prefer `modify_components` for component property writes; do not jump straight to `set-property` without a confirmed path.
 
-// 官方类型: SetPropertyOptions
-// 返回值
-boolean
-```
+## Verification
 
----
+- Node property changes: `query-node`
+- Component property changes: `query-node` or `query-components`
+- Array operations: read back the full dump and confirm order or count changes
 
-### `move-array-element`
+## Cross References
 
-移动数组元素位置（调整顺序）。
-
-```typescript
-// 参数
-[{
-  uuid: string,    // 节点或组件 UUID
-  path: string,    // 数组属性路径
-  target: number,  // 元素当前索引
-  offset: number   // 移动偏移量（正数向后，负数向前）
-}]
-
-// 官方类型: MoveArrayOptions
-// 返回值
-boolean
-```
-
-**示例：**
-```typescript
-// 将第 0 个元素移到第 2 个位置
-editor_request({
-  channel: "scene",
-  command: "move-array-element",
-  args: [{
-    uuid: "node-uuid",
-    path: "__comps__",
-    target: 0,
-    offset: 2
-  }]
-})
-```
-
----
-
-### `remove-array-element`
-
-移除数组元素。
-
-```typescript
-// 参数
-[{
-  uuid: string,
-  path: string,
-  index: number  // 要移除的元素索引
-}]
-
-// 官方类型: RemoveArrayOptions
-// 返回值
-boolean
-```
-
----
-
-## 属性路径表
-
-### 节点基础属性
-
-| 路径 | 说明 | Dump Type | 值格式 |
-|------|------|-----------|--------|
-| `position` | 位置 | `cc.Vec3` | `{ x, y, z }` |
-| `scale` | 缩放 | `cc.Vec3` | `{ x, y, z }` |
-| `rotation` | 四元数旋转 | `cc.Quat` | `{ x, y, z, w }` |
-| `eulerAngles` | 欧拉角旋转 | `cc.Vec3` | `{ x, y, z }` |
-| `active` | 激活状态 | `Boolean` | `true` / `false` |
-| `name` | 节点名称 | `String` | `"NodeName"` |
-| `layer` | 层级 | `Number` | `33554432` |
-| `mobility` | 移动性 | `Number` | `0`(Static) / `1`(Stationary) / `2`(Movable) |
-
-### 组件属性路径
-
-组件属性使用 `__comps__.{index}.{property}` 路径格式，其中 `index` 是组件在节点组件列表中的位置。
-
-| 路径 | 说明 | Dump Type | 值格式 |
-|------|------|-----------|--------|
-| `__comps__.0.enabled` | 第一个组件的启用状态 | `Boolean` | `true` / `false` |
-| `__comps__.0.color` | Sprite 颜色 | `cc.Color` | `{ r, g, b, a }` |
-| `__comps__.0.string` | Label 文本 | `String` | `"Hello"` |
-| `__comps__.0.fontSize` | Label 字号 | `Number` | `24` |
-| `__comps__.0.spriteFrame` | Sprite 帧引用 | `cc.SpriteFrame` | `{ uuid: "asset-uuid" }` |
-| `__comps__.0.sizeMode` | Sprite 尺寸模式 | `Number` | `0`(Custom) / `1`(Trimmed) / `2`(Raw) |
-
----
-
-## 值类型定义
-
-### `cc.Vec3`
-
-```typescript
-{ x: number, y: number, z: number }
-```
-
-### `cc.Vec2`
-
-```typescript
-{ x: number, y: number }
-```
-
-### `cc.Color`
-
-```typescript
-{
-  r: number,  // 0-255
-  g: number,  // 0-255
-  b: number,  // 0-255
-  a: number   // 0-255
-}
-```
-
-### `cc.Size`
-
-```typescript
-{ width: number, height: number }
-```
-
-### `cc.Quat`
-
-```typescript
-{ x: number, y: number, z: number, w: number }
-```
-
-### 资源引用
-
-```typescript
-{ uuid: "asset-uuid-string" }
-```
-
-### `IProperty` (Dump 数据格式)
-
-```typescript
-interface IProperty {
-  value: any;           // 属性值
-  type?: string;        // 类型标识
-  readonly?: boolean;   // 是否只读
-  visible?: boolean;    // 是否可见
-}
-```
-
----
-
-## 常见用法模式
-
-### 模式 1：修改节点 Transform
-
-```typescript
-// 设置位置
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "position",
-    dump: { type: "cc.Vec3", value: { x: 100, y: 200, z: 0 } }
-  }]
-});
-
-// 设置缩放
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "scale",
-    dump: { type: "cc.Vec3", value: { x: 2, y: 2, z: 1 } }
-  }]
-});
-
-// 设置旋转（欧拉角）
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "eulerAngles",
-    dump: { type: "cc.Vec3", value: { x: 0, y: 45, z: 0 } }
-  }]
-});
-```
-
-### 模式 2：修改组件属性
-
-```typescript
-// 修改 Label 文本
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "__comps__.0.string",
-    dump: { type: "String", value: "New Text" }
-  }]
-});
-
-// 修改 Sprite 引用的图片
-await editor_request({
-  channel: "scene",
-  command: "set-property",
-  args: [{
-    uuid: "node-uuid",
-    path: "__comps__.0.spriteFrame",
-    dump: { type: "cc.SpriteFrame", value: { uuid: "sprite-frame-uuid" } }
-  }]
-});
-```
-
-### 模式 3：批量设置节点为不可见
-
-```typescript
-const uuids = ["node-1", "node-2", "node-3"];
-for (const uuid of uuids) {
-  await editor_request({
-    channel: "scene",
-    command: "set-property",
-    args: [{
-      uuid,
-      path: "active",
-      dump: { type: "Boolean", value: false }
-    }]
-  });
-}
-```
+- Definitions: `references/11-definitions.md`
+- Node creation / reparenting: `references/02-node-lifecycle.md`
+- Component operations: `references/04-component-operations.md`

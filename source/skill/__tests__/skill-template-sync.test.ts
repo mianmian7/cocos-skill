@@ -4,54 +4,141 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
-  ensureManagedExperienceBlock,
-  EXPERIENCE_BLOCK_END,
-  EXPERIENCE_BLOCK_START,
-  extractManagedExperienceBlock,
+  LOCAL_NOTES_BLOCK_END,
+  LOCAL_NOTES_BLOCK_START,
+  LOCAL_NOTES_USER_BLOCK_END,
+  LOCAL_NOTES_USER_BLOCK_START,
+  MANAGED_BODY_BLOCK_END,
+  MANAGED_BODY_BLOCK_START,
+  syncTemplateFile,
   syncSkillTemplateFile,
 } from "../skill-template-sync.js";
-
-const SOURCE_BLOCK = [
-  EXPERIENCE_BLOCK_START,
-  "## 经验沉淀",
+const SOURCE_SKILL = [
+  "---",
+  "name: cocos-skill",
+  "description: Use when editing a Cocos Creator project through cocos-skill HTTP APIs.",
+  "---",
   "",
-  "新模板内容",
-  EXPERIENCE_BLOCK_END,
+  MANAGED_BODY_BLOCK_START,
+  "# Cocos Skill",
+  "",
+  "新模板主体内容。",
+  MANAGED_BODY_BLOCK_END,
+  "",
+  LOCAL_NOTES_BLOCK_START,
+  "## Project Notes",
+  "",
+  "This section is preserved during template sync.",
+  "",
+  LOCAL_NOTES_USER_BLOCK_START,
+  "- Add project-specific notes here.",
+  LOCAL_NOTES_USER_BLOCK_END,
+  LOCAL_NOTES_BLOCK_END,
+  "",
 ].join("\n");
-
-test("extractManagedExperienceBlock should return the managed block from template content", () => {
-  const content = `# Skill\n\n${SOURCE_BLOCK}\n`;
-
-  assert.equal(extractManagedExperienceBlock(content), SOURCE_BLOCK);
-});
-
-test("ensureManagedExperienceBlock should append the managed block when target content has no block", () => {
-  const target = "# Existing Skill\n\nOriginal content.\n";
-  const updated = ensureManagedExperienceBlock(target, SOURCE_BLOCK);
-
-  assert.equal(updated.changed, true);
-  assert.match(updated.content, /Original content\./);
-  assert.match(updated.content, /## 经验沉淀/);
-});
-
-test("syncSkillTemplateFile should replace only the managed block for an existing SKILL file", () => {
+const LEGACY_EXPERIENCE_BLOCK_START = "<!-- cocos-skill:experience:start -->";
+const LEGACY_EXPERIENCE_BLOCK_END = "<!-- cocos-skill:experience:end -->";
+const LEGACY_EXPERIENCE_TEMPLATE_BODY = [
+  "## Experience Capture",
+  "",
+  "Capture reusable, verified lessons from development, review, debugging, and validation.",
+  "",
+  "- Keep short rules here; move long rationale, commands, and examples to `references/12-experience-capture.md`.",
+  "- Use this schema: `Title`, `Signal`, `Root Cause / Constraints`, `Correct Approach`, `Verification`, `Scope`.",
+  "- Skip guesses, one-off noise, and branch-local details.",
+].join("\n");
+const EXPERIENCE_CAPTURE_USER_BLOCK_START = "<!-- cocos-skill:experience-capture:user:start -->";
+const EXPERIENCE_CAPTURE_USER_BLOCK_END = "<!-- cocos-skill:experience-capture:user:end -->";
+const SOURCE_EXPERIENCE_CAPTURE = [
+  "# 12 — Experience Capture",
+  "",
+  "Bundled shell v2.",
+  "",
+  "## Maintenance",
+  "",
+  "- Append incrementally inside the preserved user block; do not rewrite unrelated lessons.",
+  "",
+  EXPERIENCE_CAPTURE_USER_BLOCK_START,
+  "### Add a lesson here.",
+  EXPERIENCE_CAPTURE_USER_BLOCK_END,
+  "",
+].join("\n");
+const LEGACY_EXPERIENCE_CAPTURE = SOURCE_EXPERIENCE_CAPTURE
+  .replace(
+    [
+      EXPERIENCE_CAPTURE_USER_BLOCK_START,
+      "### Add a lesson here.",
+      EXPERIENCE_CAPTURE_USER_BLOCK_END,
+      "",
+    ].join("\n"),
+    "",
+  )
+  .trimEnd()
+  .concat("\n");
+test("syncSkillTemplateFile should migrate a legacy SKILL file to the latest managed template body", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
-  const sourcePath = path.join(tempDir, "source-SKILL.md");
-  const targetPath = path.join(tempDir, "target-SKILL.md");
+  const sourcePath = path.join(tempDir, "source", "SKILL.md");
+  const targetPath = path.join(tempDir, "target", "SKILL.md");
 
-  fs.writeFileSync(sourcePath, `# Source Skill\n\n${SOURCE_BLOCK}\n`, "utf8");
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, SOURCE_SKILL, "utf8");
   fs.writeFileSync(
     targetPath,
     [
-      "# Target Skill",
+      "---",
+      "name: cocos-skill",
+      "description: Old description.",
+      "---",
       "",
-      "Keep user content.",
+      "# Old Skill",
       "",
-      EXPERIENCE_BLOCK_START,
-      "## 经验沉淀",
+      "旧版主体内容。",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncSkillTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /Use when editing a Cocos Creator project/);
+  assert.match(synced, /新模板主体内容/);
+  assert.match(synced, new RegExp(MANAGED_BODY_BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(synced, new RegExp(LOCAL_NOTES_BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(synced, /旧版主体内容/);
+});
+test("syncSkillTemplateFile should preserve local notes while refreshing the managed body", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source", "SKILL.md");
+  const targetPath = path.join(tempDir, "target", "SKILL.md");
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, SOURCE_SKILL, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      "---",
+      "name: cocos-skill",
+      "description: Old description.",
+      "---",
       "",
-      "旧模板内容",
-      EXPERIENCE_BLOCK_END,
+      MANAGED_BODY_BLOCK_START,
+      "# Cocos Skill",
+      "",
+      "旧模板主体内容。",
+      MANAGED_BODY_BLOCK_END,
+      "",
+      LOCAL_NOTES_BLOCK_START,
+      "## Project Notes",
+      "",
+      "Old shell text.",
+      "",
+      LOCAL_NOTES_USER_BLOCK_START,
+      "- 项目自己的备注要保留。",
+      LOCAL_NOTES_USER_BLOCK_END,
+      LOCAL_NOTES_BLOCK_END,
       "",
     ].join("\n"),
     "utf8",
@@ -61,7 +148,152 @@ test("syncSkillTemplateFile should replace only the managed block for an existin
   const synced = fs.readFileSync(targetPath, "utf8");
 
   assert.equal(result, "updated");
-  assert.match(synced, /Keep user content\./);
-  assert.match(synced, /新模板内容/);
-  assert.doesNotMatch(synced, /旧模板内容/);
+  assert.match(synced, /新模板主体内容/);
+  assert.match(synced, /This section is preserved during template sync/);
+  assert.match(synced, /项目自己的备注要保留/);
+  assert.doesNotMatch(synced, /旧模板主体内容/);
+  assert.doesNotMatch(synced, /Old shell text/);
+});
+test("syncSkillTemplateFile should migrate legacy experience notes into the local-notes user block", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source", "SKILL.md");
+  const targetPath = path.join(tempDir, "target", "SKILL.md");
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, SOURCE_SKILL, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      "---",
+      "name: cocos-skill",
+      "description: Old description.",
+      "---",
+      "",
+      "# Old Skill",
+      "",
+      "旧版主体内容。",
+      "",
+      LEGACY_EXPERIENCE_BLOCK_START,
+      LEGACY_EXPERIENCE_TEMPLATE_BODY,
+      "",
+      "- 场景切换前先 `query-dirty`，脏场景先保存。",
+      LEGACY_EXPERIENCE_BLOCK_END,
+      "",
+      "### Extra Lesson",
+      "",
+      "长备注也要保留。",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncSkillTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /query-dirty/);
+  assert.match(synced, /长备注也要保留/);
+  assert.match(synced, new RegExp(LOCAL_NOTES_USER_BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(synced, /cocos-skill:experience:start/);
+  assert.doesNotMatch(synced, /Keep short rules here/);
+});
+test("syncTemplateFile should overwrite non-SKILL template files when bundled content changes", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source-reference.md");
+  const targetPath = path.join(tempDir, "target-reference.md");
+
+  fs.writeFileSync(sourcePath, "# Routed Reference\n\nnew bundled content\n", "utf8");
+  fs.writeFileSync(targetPath, "# Routed Reference\n\nold copied content\n", "utf8");
+
+  const result = syncTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /new bundled content/);
+  assert.doesNotMatch(synced, /old copied content/);
+});
+test("syncTemplateFile should preserve the experience-capture user block while refreshing bundled shell text", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source-reference.md");
+  const targetPath = path.join(tempDir, "target-reference.md");
+
+  fs.writeFileSync(sourcePath, SOURCE_EXPERIENCE_CAPTURE, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      "# 12 — Experience Capture",
+      "",
+      "Old shell text.",
+      "",
+      EXPERIENCE_CAPTURE_USER_BLOCK_START,
+      "### Live project lesson",
+      "",
+      "Preserve this note.",
+      EXPERIENCE_CAPTURE_USER_BLOCK_END,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /Bundled shell v2/);
+  assert.match(synced, /Preserve this note/);
+  assert.doesNotMatch(synced, /Old shell text/);
+});
+test("syncTemplateFile should migrate legacy appended experience-capture lessons into the new user block", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source-reference.md");
+  const targetPath = path.join(tempDir, "target-reference.md");
+
+  fs.writeFileSync(sourcePath, SOURCE_EXPERIENCE_CAPTURE, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      LEGACY_EXPERIENCE_CAPTURE.trimEnd(),
+      "",
+      "### Scene Save Order",
+      "",
+      "Always save before switching scenes in this project.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /Scene Save Order/);
+  assert.match(synced, /Always save before switching scenes/);
+  assert.match(synced, new RegExp(EXPERIENCE_CAPTURE_USER_BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+test("syncSkillTemplateFile should refresh the local-notes shell while keeping the default user slot", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source", "SKILL.md");
+  const targetPath = path.join(tempDir, "target", "SKILL.md");
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, SOURCE_SKILL, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    SOURCE_SKILL.replace(
+      "This section is preserved during template sync.",
+      "Old shell text.",
+    ),
+    "utf8",
+  );
+
+  const result = syncSkillTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /This section is preserved during template sync/);
+  assert.match(synced, /Add project-specific notes here/);
+  assert.doesNotMatch(synced, /Old shell text/);
+  assert.match(synced, new RegExp(LOCAL_NOTES_BLOCK_END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });

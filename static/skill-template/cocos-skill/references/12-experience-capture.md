@@ -21,8 +21,8 @@ Do not record:
 
 ## Where To Put It
 
-- Short rule: append under `SKILL.md` -> `## Experience Capture`.
-- Longer note with commands, examples, or boundaries: write it here and leave a short summary in `SKILL.md`.
+- Project-specific short rule: write it inside the preserved `Project Notes` user block in `SKILL.md`.
+- Longer note with commands, examples, or boundaries: write it here and leave a short summary in the `Project Notes` block.
 
 ## Template
 
@@ -62,6 +62,10 @@ Before saving a lesson, check:
 
 ## Maintenance
 
-- Append incrementally; do not rewrite unrelated lessons.
+- Append incrementally inside the preserved user block; do not rewrite unrelated lessons.
 - If a new lesson replaces an old one, update the old one instead of keeping both.
 - If three or more lessons say the same thing, merge them into one higher-signal rule.
+
+<!-- cocos-skill:experience-capture:user:start -->
+### Add a lesson here.
+<!-- cocos-skill:experience-capture:user:end -->
