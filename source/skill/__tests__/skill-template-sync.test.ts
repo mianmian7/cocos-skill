@@ -10,6 +10,7 @@ import {
   LOCAL_NOTES_USER_BLOCK_START,
   MANAGED_BODY_BLOCK_END,
   MANAGED_BODY_BLOCK_START,
+  syncTemplateDirectory,
   syncTemplateFile,
   syncSkillTemplateFile,
 } from "../skill-template-sync.js";
@@ -417,4 +418,26 @@ test("bundled skill template should expose RUN_LEDGER.md as the live workflow lo
   assert.equal(fs.existsSync(runLedgerPath), true);
   assert.match(skill, /`RUN_LEDGER\.md`/);
   assert.match(program, /`RUN_LEDGER\.md`/);
+});
+test("syncTemplateDirectory should delete stale bundled files that no longer exist in source", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourceDir = path.join(tempDir, "source");
+  const targetDir = path.join(tempDir, "target");
+  const sourceReference = path.join(sourceDir, "references", "00-workflows.md");
+  const targetReference = path.join(targetDir, "references", "00-workflows.md");
+  const staleReference = path.join(targetDir, "references", "12-experience-capture.md");
+
+  fs.mkdirSync(path.dirname(sourceReference), { recursive: true });
+  fs.mkdirSync(path.dirname(targetReference), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, "SKILL.md"), SOURCE_SKILL, "utf8");
+  fs.writeFileSync(sourceReference, "# Routed Reference\n\ncurrent bundled file\n", "utf8");
+  fs.writeFileSync(path.join(targetDir, "SKILL.md"), SOURCE_SKILL, "utf8");
+  fs.writeFileSync(targetReference, "# Routed Reference\n\nold bundled file\n", "utf8");
+  fs.writeFileSync(staleReference, "# 12 — Experience Capture\n\nstale bundled file\n", "utf8");
+
+  syncTemplateDirectory(sourceDir, targetDir);
+
+  assert.equal(fs.existsSync(path.join(targetDir, "SKILL.md")), true);
+  assert.equal(fs.existsSync(targetReference), true);
+  assert.equal(fs.existsSync(staleReference), false);
 });

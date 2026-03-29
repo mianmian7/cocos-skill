@@ -1,0 +1,6 @@
+id,task,status,completed_at,notes
+1,确认旧模板文件清理的安全边界,DONE,2026-03-29 21:28,该任务会改变同步行为并删除用户项目 skill 目录中的过期模板文件
+2,等待用户确认允许引入清理旧模板文件的删除行为,DONE,2026-03-29 21:59,用户已显式确认继续引入删除行为
+3,补失败测试覆盖过期模板文件清理,DONE,2026-03-29 21:59,新增 syncTemplateDirectory 红灯测试覆盖 stale bundled file 删除
+4,实现安全的模板清理策略并验证,DONE,2026-03-29 21:59,npm run build:tsc && timeout 60s node --test dist/skill/__tests__/skill-template-sync.test.js && node scripts/qa/validate-skill-template.mjs
+5,提交模板清理原子 commit,DONE,2026-03-29 21:59,提交 feat(skill-template): 同步时清理过期模板文件

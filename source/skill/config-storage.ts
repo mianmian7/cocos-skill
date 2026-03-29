@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { SkillServerConfig, DEFAULT_SERVER_CONFIG } from './config.js';
-import { syncTemplateFile } from './skill-template-sync.js';
+import { syncTemplateDirectory } from './skill-template-sync.js';
 
 /**
  * Configuration storage manager for persisting skill server settings.
@@ -52,36 +52,6 @@ export class ConfigStorage {
         }
 
         return null;
-    }
-
-    private syncTemplateDirectory(sourceDir: string, targetDir: string): void {
-        if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-            console.log(`Created skill template directory: ${targetDir}`);
-        }
-
-        const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
-        for (const entry of entries) {
-            const sourcePath = path.join(sourceDir, entry.name);
-            const targetPath = path.join(targetDir, entry.name);
-
-            if (entry.isDirectory()) {
-                this.syncTemplateDirectory(sourcePath, targetPath);
-                continue;
-            }
-
-            if (!entry.isFile()) {
-                continue;
-            }
-
-            const result = syncTemplateFile(sourcePath, targetPath);
-            if (result === 'copied') {
-                console.log(`Copied skill template file: ${targetPath}`);
-            }
-            if (result === 'updated') {
-                console.log(`Updated skill template file: ${targetPath}`);
-            }
-        }
     }
 
     private mergeConfig(savedConfig: Partial<SkillServerConfig>): SkillServerConfig {
@@ -345,7 +315,24 @@ export class ConfigStorage {
                 }
 
                 const skillDir = path.join(dir, this.skillTemplateName);
-                this.syncTemplateDirectory(bundledTemplateDir, skillDir);
+                if (!fs.existsSync(skillDir)) {
+                    fs.mkdirSync(skillDir, { recursive: true });
+                    console.log(`Created skill template directory: ${skillDir}`);
+                }
+
+                syncTemplateDirectory(bundledTemplateDir, skillDir, {
+                    onSynced: (targetPath, result) => {
+                        if (result === 'copied') {
+                            console.log(`Copied skill template file: ${targetPath}`);
+                        }
+                        if (result === 'updated') {
+                            console.log(`Updated skill template file: ${targetPath}`);
+                        }
+                    },
+                    onDeleted: (targetPath) => {
+                        console.log(`Deleted stale skill template file: ${targetPath}`);
+                    }
+                });
             } catch (error) {
                 console.warn(`Failed to create AI directory ${dir}:`, error);
             }

@@ -26,6 +26,10 @@ const LEGACY_EXPERIENCE_TEMPLATE_BODY = [
 ].join("\n");
 
 export type SkillTemplateSyncResult = "copied" | "updated" | "skipped";
+export type SyncTemplateDirectoryOptions = {
+  onDeleted?: (targetPath: string) => void;
+  onSynced?: (targetPath: string, result: SkillTemplateSyncResult) => void;
+};
 
 type FrontmatterSplit = {
   frontmatter: string | null;
@@ -286,4 +290,56 @@ export function syncTemplateFile(sourcePath: string, targetPath: string): SkillT
 
 export function syncSkillTemplateFile(sourcePath: string, targetPath: string): SkillTemplateSyncResult {
   return syncTemplateFile(sourcePath, targetPath);
+}
+
+function ensureDirectory(targetDir: string): void {
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+}
+
+function syncSourceEntries(sourceDir: string, targetDir: string, options: SyncTemplateDirectoryOptions): void {
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      syncTemplateDirectory(sourcePath, targetPath, options);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const result = syncTemplateFile(sourcePath, targetPath);
+    if (result !== "skipped") {
+      options.onSynced?.(targetPath, result);
+    }
+  }
+}
+
+function deleteStaleEntries(sourceDir: string, targetDir: string, options: SyncTemplateDirectoryOptions): void {
+  const sourceNames = new Set(fs.readdirSync(sourceDir));
+  const targetNames = fs.existsSync(targetDir) ? fs.readdirSync(targetDir) : [];
+
+  for (const entryName of targetNames) {
+    if (sourceNames.has(entryName)) {
+      continue;
+    }
+
+    const stalePath = path.join(targetDir, entryName);
+    fs.rmSync(stalePath, { recursive: true, force: true });
+    options.onDeleted?.(stalePath);
+  }
+}
+
+export function syncTemplateDirectory(
+  sourceDir: string,
+  targetDir: string,
+  options: SyncTemplateDirectoryOptions = {},
+): void {
+  ensureDirectory(targetDir);
+  syncSourceEntries(sourceDir, targetDir, options);
+  deleteStaleEntries(sourceDir, targetDir, options);
 }
