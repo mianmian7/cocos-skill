@@ -2,13 +2,10 @@
 
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const skillDir = path.join(root, "static", "skill-template", "cocos-skill");
-const skillFile = path.join(skillDir, "SKILL.md");
-const programFile = path.join(skillDir, "PROGRAM.md");
-const runLedgerFile = path.join(skillDir, "RUN_LEDGER.md");
+const defaultSkillDir = path.join(root, "static", "skill-template", "cocos-skill");
 
 const requiredMarkers = [
   "<!-- cocos-skill:managed-body:start -->",
@@ -49,100 +46,155 @@ function extractReferences(markdown) {
   return [...new Set(matches.map((match) => match[1]))].sort();
 }
 
-const skill = read(skillFile);
-const program = read(programFile);
-const runLedger = read(runLedgerFile);
-if (!skill.startsWith("---\nname: cocos-skill\n")) {
-  fail("SKILL.md frontmatter must start with name: cocos-skill");
-}
-
-if (!/description:\s*Use when /m.test(skill)) {
-  fail("SKILL.md description must start with 'Use when'");
-}
-
-for (const marker of requiredProgramMarkers) {
-  if (!program.includes(marker)) {
-    fail(`PROGRAM.md is missing marker: ${marker}`);
+function pushWhenMissing(errors, markdown, expectedText, message) {
+  if (!markdown.includes(expectedText)) {
+    errors.push(message);
   }
 }
 
-for (const marker of requiredRunLedgerMarkers) {
-  if (!runLedger.includes(marker)) {
-    fail(`RUN_LEDGER.md is missing marker: ${marker}`);
+function validateMarkers(errors, markdown, markers, label) {
+  for (const marker of markers) {
+    if (!markdown.includes(marker)) {
+      errors.push(`${label} is missing marker: ${marker}`);
+    }
   }
 }
 
-for (const marker of requiredMarkers) {
-  if (!skill.includes(marker)) {
-    fail(`SKILL.md is missing marker: ${marker}`);
+function validateCrossDocumentRoutes(errors, { skill, program }) {
+  const requiredRoutes = [
+    {
+      content: skill,
+      expectedText: "`PROGRAM.md`",
+      message: "SKILL.md must reference `PROGRAM.md` for large live-editor tasks",
+    },
+    {
+      content: skill,
+      expectedText: "`RUN_LEDGER.md`",
+      message: "SKILL.md must reference `RUN_LEDGER.md` for multi-attempt live tasks",
+    },
+    {
+      content: program,
+      expectedText: "`RUN_LEDGER.md`",
+      message: "PROGRAM.md must reference `RUN_LEDGER.md` for multi-attempt tracking",
+    },
+  ];
+
+  for (const route of requiredRoutes) {
+    pushWhenMissing(errors, route.content, route.expectedText, route.message);
   }
 }
 
-const referenced = extractReferences(skill);
-const onDisk = fs.readdirSync(path.join(skillDir, "references"))
-  .filter((file) => file.endsWith(".md"))
-  .map((file) => `references/${file}`)
-  .sort();
+function validateReferenceRouting(errors, skillDir, skill) {
+  const referenced = extractReferences(skill);
+  const onDisk = fs.readdirSync(path.join(skillDir, "references"))
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => `references/${file}`)
+    .sort();
 
-for (const relativePath of referenced) {
-  if (!fs.existsSync(path.join(skillDir, relativePath))) {
-    fail(`SKILL.md references missing file: ${relativePath}`);
-  }
-}
-
-for (const relativePath of onDisk) {
-  if (!referenced.includes(relativePath)) {
-    fail(`Unrouted reference file: ${relativePath}`);
-  }
-}
-
-for (const relativePath of onDisk) {
-  const absolutePath = path.join(skillDir, relativePath);
-  const content = read(absolutePath);
-  const lineCount = content.split("\n").length;
-  if (lineCount > MAX_REFERENCE_LINES) {
-    fail(`Reference file exceeds ${MAX_REFERENCE_LINES} lines: ${relativePath} (${lineCount})`);
-  }
-
-  if (!referenceSourceExceptions.has(relativePath) && FORBIDDEN_TEMPLATE_PROVENANCE.test(content)) {
-    fail(`Bundled skill reference should not include provenance metadata: ${relativePath}`);
-  }
-
-  for (const marker of requiredReferenceMarkers.get(relativePath) ?? []) {
-    if (!content.includes(marker)) {
-      fail(`Reference file is missing marker ${marker}: ${relativePath}`);
+  for (const relativePath of referenced) {
+    if (!fs.existsSync(path.join(skillDir, relativePath))) {
+      errors.push(`SKILL.md references missing file: ${relativePath}`);
     }
   }
 
-  if (FORBIDDEN_TEMPLATE_CJK.test(content)) {
-    fail(`Bundled skill reference should stay English-only: ${relativePath}`);
+  for (const relativePath of onDisk) {
+    if (!referenced.includes(relativePath)) {
+      errors.push(`Unrouted reference file: ${relativePath}`);
+    }
+  }
+
+  return onDisk;
+}
+
+function validateReferences(errors, skillDir, onDisk) {
+  for (const relativePath of onDisk) {
+    const absolutePath = path.join(skillDir, relativePath);
+    const content = read(absolutePath);
+    const lineCount = content.split("\n").length;
+    if (lineCount > MAX_REFERENCE_LINES) {
+      errors.push(`Reference file exceeds ${MAX_REFERENCE_LINES} lines: ${relativePath} (${lineCount})`);
+    }
+
+    if (!referenceSourceExceptions.has(relativePath) && FORBIDDEN_TEMPLATE_PROVENANCE.test(content)) {
+      errors.push(`Bundled skill reference should not include provenance metadata: ${relativePath}`);
+    }
+
+    for (const marker of requiredReferenceMarkers.get(relativePath) ?? []) {
+      if (!content.includes(marker)) {
+        errors.push(`Reference file is missing marker ${marker}: ${relativePath}`);
+      }
+    }
+
+    if (FORBIDDEN_TEMPLATE_CJK.test(content)) {
+      errors.push(`Bundled skill reference should stay English-only: ${relativePath}`);
+    }
   }
 }
 
-if (FORBIDDEN_TEMPLATE_PROVENANCE.test(skill)) {
-  fail("SKILL.md should not include provenance metadata");
+function validateTopLevelDocuments(errors, { skill, program, runLedger }) {
+  if (!skill.startsWith("---\nname: cocos-skill\n")) {
+    errors.push("SKILL.md frontmatter must start with name: cocos-skill");
+  }
+
+  if (!/description:\s*Use when /m.test(skill)) {
+    errors.push("SKILL.md description must start with 'Use when'");
+  }
+
+  validateMarkers(errors, program, requiredProgramMarkers, "PROGRAM.md");
+  validateMarkers(errors, runLedger, requiredRunLedgerMarkers, "RUN_LEDGER.md");
+  validateMarkers(errors, skill, requiredMarkers, "SKILL.md");
+
+  if (FORBIDDEN_TEMPLATE_PROVENANCE.test(skill)) {
+    errors.push("SKILL.md should not include provenance metadata");
+  }
+
+  if (FORBIDDEN_TEMPLATE_CJK.test(skill)) {
+    errors.push("SKILL.md should stay English-only");
+  }
+
+  if (FORBIDDEN_TEMPLATE_PROVENANCE.test(program)) {
+    errors.push("PROGRAM.md should not include provenance metadata");
+  }
+
+  if (FORBIDDEN_TEMPLATE_CJK.test(program)) {
+    errors.push("PROGRAM.md should stay English-only");
+  }
+
+  if (FORBIDDEN_TEMPLATE_PROVENANCE.test(runLedger)) {
+    errors.push("RUN_LEDGER.md should not include provenance metadata");
+  }
+
+  if (FORBIDDEN_TEMPLATE_CJK.test(runLedger)) {
+    errors.push("RUN_LEDGER.md should stay English-only");
+  }
 }
 
-if (FORBIDDEN_TEMPLATE_CJK.test(skill)) {
-  fail("SKILL.md should stay English-only");
+export function validateSkillTemplateDirectory(skillDir = defaultSkillDir) {
+  const skill = read(path.join(skillDir, "SKILL.md"));
+  const program = read(path.join(skillDir, "PROGRAM.md"));
+  const runLedger = read(path.join(skillDir, "RUN_LEDGER.md"));
+  const errors = [];
+
+  validateTopLevelDocuments(errors, { skill, program, runLedger });
+  validateCrossDocumentRoutes(errors, { skill, program });
+  const onDisk = validateReferenceRouting(errors, skillDir, skill);
+  validateReferences(errors, skillDir, onDisk);
+
+  return errors;
 }
 
-if (FORBIDDEN_TEMPLATE_PROVENANCE.test(program)) {
-  fail("PROGRAM.md should not include provenance metadata");
-}
+function main() {
+  const errors = validateSkillTemplateDirectory();
+  if (errors.length > 0) {
+    for (const error of errors) {
+      fail(error);
+    }
+    return;
+  }
 
-if (FORBIDDEN_TEMPLATE_CJK.test(program)) {
-  fail("PROGRAM.md should stay English-only");
-}
-
-if (FORBIDDEN_TEMPLATE_PROVENANCE.test(runLedger)) {
-  fail("RUN_LEDGER.md should not include provenance metadata");
-}
-
-if (FORBIDDEN_TEMPLATE_CJK.test(runLedger)) {
-  fail("RUN_LEDGER.md should stay English-only");
-}
-
-if (!process.exitCode) {
   console.log("Skill template validation passed.");
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }

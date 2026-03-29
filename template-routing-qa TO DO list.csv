@@ -1,0 +1,6 @@
+id,task,status,completed_at,notes
+1,审查当前模板 QA 的路由断言缺口,DONE,2026-03-29 21:28,已确认 validate-skill-template 仍未强制校验 SKILL PROGRAM RUN_LEDGER 之间的互相引用
+2,补失败测试或 QA 断言覆盖模板路由关系,DONE,2026-03-29 21:48,新增 validate-skill-template.test.mjs 覆盖 3 条缺失路由与 import 副作用
+3,实现模板路由关系校验,DONE,2026-03-29 21:48,导出 validateSkillTemplateDirectory 并强制校验 SKILL/PROGRAM/RUN_LEDGER 路由关系
+4,运行模板 QA 与相关测试验证改动,DONE,2026-03-29 21:48,node --test scripts/__tests__/validate-skill-template.test.mjs && node scripts/qa/validate-skill-template.mjs && npm run build:tsc
+5,提交模板路由 QA 原子 commit,DONE,2026-03-29 21:48,提交 test(qa): 强化模板工作流路由校验
