@@ -31,6 +31,7 @@ Do not use this skill when:
 
 Read `PROGRAM.md` before large live-editor tasks. It defines the default baseline, verification, keep-or-discard, and manual-review policy for this bundled skill.
 Use `RUN_LEDGER.md` when a task needs more than one live attempt or a durable decision log.
+Use `references/12-acceptance-matrix.md` when you need the smallest safe readback for a node, component, asset, or scene mutation.
 
 1. `POST /skill/context` to inspect the current scene, selection, dirty state, and hierarchy.
 2. `POST /skill/search-nodes` or query assets/components to locate the real live target.
@@ -76,6 +77,7 @@ Use `RUN_LEDGER.md` when a task needs more than one live attempt or a durable de
 | Focus camera, switch 2D/3D, or change gizmo state | `editor_request` | `references/09-viewport-gizmo.md` |
 | Select nodes/assets or edit project settings | `editor_request`, `operate_project_settings` | `references/10-selection-and-project.md` |
 | Discover valid property paths and types before mutation | definitions endpoints | `references/11-definitions.md` |
+| Choose the smallest readback after a live mutation | changed surface first, broader reads only when needed | `references/12-acceptance-matrix.md` |
 | Record project-specific workflow quirks that should survive sync | local notes block below | `PROGRAM.md` user block or `Project Notes` below |
 
 ## High-Signal Rules

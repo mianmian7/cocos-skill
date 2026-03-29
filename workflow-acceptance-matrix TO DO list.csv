@@ -1,0 +1,6 @@
+id,task,status,completed_at,notes
+1,确定验收矩阵的模板落点与命名,DONE,2026-03-29 21:28,建议新增 bundled reference 只覆盖节点 组件 资源 场景四类回读链路
+2,补失败测试覆盖新 reference 路由与存在性,DONE,2026-03-29 21:52,新增 workflow-acceptance-matrix.test.mjs 覆盖文件存在 路由入口 与四类内容范围
+3,实现 workflow acceptance matrix 模板并接入路由,DONE,2026-03-29 21:52,新增 references/12-acceptance-matrix.md 并接入 SKILL.md 与 00-workflows.md
+4,运行模板 QA 与相关测试验证改动,DONE,2026-03-29 21:52,node --test scripts/__tests__/workflow-acceptance-matrix.test.mjs scripts/__tests__/validate-skill-template.test.mjs && node scripts/qa/validate-skill-template.mjs && npm run build:tsc
+5,提交验收矩阵原子 commit,DONE,2026-03-29 21:52,提交 docs(skill-template): 新增验收回读矩阵

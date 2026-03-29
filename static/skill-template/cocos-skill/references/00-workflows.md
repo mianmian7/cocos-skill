@@ -3,6 +3,7 @@
 Use this file when you already know the goal, but you need the shortest safe path through the available tools.
 
 Before any large live-editor workflow, read `PROGRAM.md` once. It defines baseline capture, verification, keep-or-discard decisions, and manual-review stops.
+For node, component, asset, or scene readback choices after a mutation, use `references/12-acceptance-matrix.md`.
 
 ## Inspect Live Editor State
 
