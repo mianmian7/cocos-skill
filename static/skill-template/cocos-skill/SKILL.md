@@ -30,6 +30,7 @@ Do not use this skill when:
 ## Default Operating Pattern
 
 Read `PROGRAM.md` before large live-editor tasks. It defines the default baseline, verification, keep-or-discard, and manual-review policy for this bundled skill.
+Use `RUN_LEDGER.md` when a task needs more than one live attempt or a durable decision log.
 
 1. `POST /skill/context` to inspect the current scene, selection, dirty state, and hierarchy.
 2. `POST /skill/search-nodes` or query assets/components to locate the real live target.
@@ -62,6 +63,7 @@ Read `PROGRAM.md` before large live-editor tasks. It defines the default baselin
 | Task | Start Here | Next Reference |
 |------|------------|----------------|
 | Load the default execution policy for live-editor work | `PROGRAM.md` | baseline, verification, keep-or-discard policy |
+| Record one live task across multiple attempts | `RUN_LEDGER.md` | baseline, attempts, verification, final decision |
 | Choose the right workflow quickly | `context` | `references/00-workflows.md` |
 | Inspect hierarchy or query nodes | `context`, `search_nodes`, `query_nodes` | `references/01-node-query.md` |
 | Create, delete, copy, move, or re-parent nodes | `create_nodes`, `modify_nodes` | `references/02-node-lifecycle.md` |

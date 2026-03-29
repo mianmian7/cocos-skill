@@ -51,6 +51,8 @@ const EXPERIENCE_CAPTURE_USER_BLOCK_START = "<!-- cocos-skill:experience-capture
 const EXPERIENCE_CAPTURE_USER_BLOCK_END = "<!-- cocos-skill:experience-capture:user:end -->";
 const PROGRAM_USER_BLOCK_START = "<!-- cocos-skill:program:user:start -->";
 const PROGRAM_USER_BLOCK_END = "<!-- cocos-skill:program:user:end -->";
+const RUN_LEDGER_USER_BLOCK_START = "<!-- cocos-skill:run-ledger:user:start -->";
+const RUN_LEDGER_USER_BLOCK_END = "<!-- cocos-skill:run-ledger:user:end -->";
 const SOURCE_EXPERIENCE_CAPTURE = [
   "# 12 — Experience Capture",
   "",
@@ -91,6 +93,22 @@ const SOURCE_PROGRAM = [
   "",
   "- Record the first live readback before mutating anything.",
   PROGRAM_USER_BLOCK_END,
+  "",
+].join("\n");
+const SOURCE_RUN_LEDGER = [
+  "# Cocos Skill Run Ledger",
+  "",
+  "Bundled run ledger shell v1.",
+  "",
+  "## Attempts",
+  "",
+  "Use this file to track baseline, attempts, verification, and decisions for one live-editor task.",
+  "",
+  RUN_LEDGER_USER_BLOCK_START,
+  "## Run Context",
+  "",
+  "- Task:",
+  RUN_LEDGER_USER_BLOCK_END,
   "",
 ].join("\n");
 test("syncSkillTemplateFile should migrate a legacy SKILL file to the latest managed template body", () => {
@@ -358,4 +376,45 @@ test("bundled skill template should route workflow guidance through PROGRAM.md w
   assert.match(workflows, /`PROGRAM\.md`/);
   assert.doesNotMatch(skill, /references\/12-experience-capture\.md/);
   assert.equal(fs.existsSync(experienceCapturePath), false);
+});
+test("syncTemplateFile should preserve the run-ledger user block while refreshing bundled ledger shell text", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source-run-ledger.md");
+  const targetPath = path.join(tempDir, "target-run-ledger.md");
+
+  fs.writeFileSync(sourcePath, SOURCE_RUN_LEDGER, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      "# Cocos Skill Run Ledger",
+      "",
+      "Old ledger shell text.",
+      "",
+      RUN_LEDGER_USER_BLOCK_START,
+      "## Attempts",
+      "",
+      "- Decision: keep",
+      RUN_LEDGER_USER_BLOCK_END,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /Bundled run ledger shell v1/);
+  assert.match(synced, /Decision: keep/);
+  assert.doesNotMatch(synced, /Old ledger shell text/);
+});
+test("bundled skill template should expose RUN_LEDGER.md as the live workflow log template", () => {
+  const templateDir = path.join(process.cwd(), "static", "skill-template", "cocos-skill");
+  const skill = fs.readFileSync(path.join(templateDir, "SKILL.md"), "utf8");
+  const program = fs.readFileSync(path.join(templateDir, "PROGRAM.md"), "utf8");
+  const runLedgerPath = path.join(templateDir, "RUN_LEDGER.md");
+
+  assert.equal(fs.existsSync(runLedgerPath), true);
+  assert.match(skill, /`RUN_LEDGER\.md`/);
+  assert.match(program, /`RUN_LEDGER\.md`/);
 });

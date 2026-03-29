@@ -1,0 +1,6 @@
+id,task,status,completed_at,notes
+1,梳理 P1 模板与现有同步测试约束,DONE,2026-03-29 21:10,已确认 PROGRAM 入口 现有 syncTemplateFile preserved block 机制 QA 结构与当前工作树边界
+2,先补失败测试覆盖 RUN_LEDGER 路由与保留块,DONE,2026-03-29 21:14,已补红灯测试 覆盖 RUN_LEDGER user block 保留与 bundled 路由暴露
+3,实现 RUN_LEDGER 模板并更新 PROGRAM/SKILL 提示,DONE,2026-03-29 21:17,已新增 RUN_LEDGER.md 并接入 PROGRAM 与 SKILL 文案
+4,调整同步与模板 QA 识别 RUN_LEDGER,DONE,2026-03-29 21:17,已扩展 preserved block 与 validate-skill-template 对 RUN_LEDGER 的校验
+5,运行验证命令确认改动,DONE,2026-03-29 21:21,build:tsc qa:no-legacy validate-skill-template 与 83/83 node:test 通过

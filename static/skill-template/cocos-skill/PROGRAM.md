@@ -16,7 +16,8 @@ Turn the bundled skill from a static API manual into a repeatable workflow:
 1. Read this file before large live-editor tasks.
 2. Use `SKILL.md` for endpoint discovery and task routing.
 3. Use this file for execution policy, verification rules, and keep or discard decisions.
-4. Keep instructions concrete and project-specific inside the preserved user block only.
+4. Use `RUN_LEDGER.md` when the task needs multiple live attempts or explicit keep/discard tracking.
+5. Keep instructions concrete and project-specific inside the preserved user block only.
 
 ## Baseline
 
@@ -45,6 +46,8 @@ Never treat a write response alone as proof of success.
 - `keep`: the change is visible in live readback and matches the intended effect.
 - `discard`: the change failed, hit the wrong target, or produced a worse verified state.
 - `manual-review`: the API succeeded but the live outcome is ambiguous, partial, or too risky to continue automatically.
+
+For multi-attempt tasks, record the baseline, attempts, and final decision in `RUN_LEDGER.md`.
 
 ## Failure Handling
 

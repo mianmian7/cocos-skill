@@ -8,6 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const skillDir = path.join(root, "static", "skill-template", "cocos-skill");
 const skillFile = path.join(skillDir, "SKILL.md");
 const programFile = path.join(skillDir, "PROGRAM.md");
+const runLedgerFile = path.join(skillDir, "RUN_LEDGER.md");
 
 const requiredMarkers = [
   "<!-- cocos-skill:managed-body:start -->",
@@ -26,6 +27,10 @@ const requiredReferenceMarkers = new Map();
 const requiredProgramMarkers = [
   "<!-- cocos-skill:program:user:start -->",
   "<!-- cocos-skill:program:user:end -->",
+];
+const requiredRunLedgerMarkers = [
+  "<!-- cocos-skill:run-ledger:user:start -->",
+  "<!-- cocos-skill:run-ledger:user:end -->",
 ];
 const FORBIDDEN_TEMPLATE_PROVENANCE = /(官方类型来源|来源说明|工具来源|@cocos\/creator-types)/;
 const FORBIDDEN_TEMPLATE_CJK = /[\u3400-\u9FFF]/;
@@ -46,6 +51,7 @@ function extractReferences(markdown) {
 
 const skill = read(skillFile);
 const program = read(programFile);
+const runLedger = read(runLedgerFile);
 if (!skill.startsWith("---\nname: cocos-skill\n")) {
   fail("SKILL.md frontmatter must start with name: cocos-skill");
 }
@@ -57,6 +63,12 @@ if (!/description:\s*Use when /m.test(skill)) {
 for (const marker of requiredProgramMarkers) {
   if (!program.includes(marker)) {
     fail(`PROGRAM.md is missing marker: ${marker}`);
+  }
+}
+
+for (const marker of requiredRunLedgerMarkers) {
+  if (!runLedger.includes(marker)) {
+    fail(`RUN_LEDGER.md is missing marker: ${marker}`);
   }
 }
 
@@ -121,6 +133,14 @@ if (FORBIDDEN_TEMPLATE_PROVENANCE.test(program)) {
 
 if (FORBIDDEN_TEMPLATE_CJK.test(program)) {
   fail("PROGRAM.md should stay English-only");
+}
+
+if (FORBIDDEN_TEMPLATE_PROVENANCE.test(runLedger)) {
+  fail("RUN_LEDGER.md should not include provenance metadata");
+}
+
+if (FORBIDDEN_TEMPLATE_CJK.test(runLedger)) {
+  fail("RUN_LEDGER.md should stay English-only");
 }
 
 if (!process.exitCode) {
