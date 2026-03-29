@@ -7,6 +7,8 @@ export const LOCAL_NOTES_BLOCK_START = "<!-- cocos-skill:local-notes:start -->";
 export const LOCAL_NOTES_BLOCK_END = "<!-- cocos-skill:local-notes:end -->";
 export const LOCAL_NOTES_USER_BLOCK_START = "<!-- cocos-skill:local-notes:user:start -->";
 export const LOCAL_NOTES_USER_BLOCK_END = "<!-- cocos-skill:local-notes:user:end -->";
+export const PROGRAM_USER_BLOCK_START = "<!-- cocos-skill:program:user:start -->";
+export const PROGRAM_USER_BLOCK_END = "<!-- cocos-skill:program:user:end -->";
 const LEGACY_EXPERIENCE_BLOCK_START = "<!-- cocos-skill:experience:start -->";
 const LEGACY_EXPERIENCE_BLOCK_END = "<!-- cocos-skill:experience:end -->";
 const EXPERIENCE_CAPTURE_USER_BLOCK_START = "<!-- cocos-skill:experience-capture:user:start -->";
@@ -35,6 +37,7 @@ type PreservedBlock = {
 
 const PRESERVED_BLOCKS: readonly PreservedBlock[] = [
   { start: LOCAL_NOTES_USER_BLOCK_START, end: LOCAL_NOTES_USER_BLOCK_END },
+  { start: PROGRAM_USER_BLOCK_START, end: PROGRAM_USER_BLOCK_END },
   { start: EXPERIENCE_CAPTURE_USER_BLOCK_START, end: EXPERIENCE_CAPTURE_USER_BLOCK_END },
 ];
 

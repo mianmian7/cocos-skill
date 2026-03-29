@@ -2,6 +2,8 @@
 
 Use this file when you already know the goal, but you need the shortest safe path through the available tools.
 
+Before any large live-editor workflow, read `PROGRAM.md` once. It defines baseline capture, verification, keep-or-discard decisions, and manual-review stops.
+
 ## Inspect Live Editor State
 
 1. `POST /skill/context`
@@ -62,8 +64,8 @@ For destructive or approval-sensitive changes:
 
 ## Record Project-Specific Lessons
 
-When you discover a rule that only matters to this project:
+When you discover a workflow rule that only matters to this project:
 
-1. Write it in the preserved `Project Notes` block in `SKILL.md`.
-2. Keep it short and verifiable.
-3. Use the schema from `references/12-experience-capture.md`.
+1. Write execution-policy rules in the preserved user block of `PROGRAM.md`.
+2. Write short lookup quirks or asset caveats in `SKILL.md` `Project Notes`.
+3. Keep both kinds of notes short and verifiable.

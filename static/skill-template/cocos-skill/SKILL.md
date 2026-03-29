@@ -29,6 +29,8 @@ Do not use this skill when:
 
 ## Default Operating Pattern
 
+Read `PROGRAM.md` before large live-editor tasks. It defines the default baseline, verification, keep-or-discard, and manual-review policy for this bundled skill.
+
 1. `POST /skill/context` to inspect the current scene, selection, dirty state, and hierarchy.
 2. `POST /skill/search-nodes` or query assets/components to locate the real live target.
 3. Before property writes, call definitions first:
@@ -59,6 +61,7 @@ Do not use this skill when:
 
 | Task | Start Here | Next Reference |
 |------|------------|----------------|
+| Load the default execution policy for live-editor work | `PROGRAM.md` | baseline, verification, keep-or-discard policy |
 | Choose the right workflow quickly | `context` | `references/00-workflows.md` |
 | Inspect hierarchy or query nodes | `context`, `search_nodes`, `query_nodes` | `references/01-node-query.md` |
 | Create, delete, copy, move, or re-parent nodes | `create_nodes`, `modify_nodes` | `references/02-node-lifecycle.md` |
@@ -71,7 +74,7 @@ Do not use this skill when:
 | Focus camera, switch 2D/3D, or change gizmo state | `editor_request` | `references/09-viewport-gizmo.md` |
 | Select nodes/assets or edit project settings | `editor_request`, `operate_project_settings` | `references/10-selection-and-project.md` |
 | Discover valid property paths and types before mutation | definitions endpoints | `references/11-definitions.md` |
-| Record project-specific lessons that should survive sync | local notes block below | `references/12-experience-capture.md` |
+| Record project-specific workflow quirks that should survive sync | local notes block below | `PROGRAM.md` user block or `Project Notes` below |
 
 ## High-Signal Rules
 

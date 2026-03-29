@@ -49,6 +49,8 @@ const LEGACY_EXPERIENCE_TEMPLATE_BODY = [
 ].join("\n");
 const EXPERIENCE_CAPTURE_USER_BLOCK_START = "<!-- cocos-skill:experience-capture:user:start -->";
 const EXPERIENCE_CAPTURE_USER_BLOCK_END = "<!-- cocos-skill:experience-capture:user:end -->";
+const PROGRAM_USER_BLOCK_START = "<!-- cocos-skill:program:user:start -->";
+const PROGRAM_USER_BLOCK_END = "<!-- cocos-skill:program:user:end -->";
 const SOURCE_EXPERIENCE_CAPTURE = [
   "# 12 — Experience Capture",
   "",
@@ -75,6 +77,22 @@ const LEGACY_EXPERIENCE_CAPTURE = SOURCE_EXPERIENCE_CAPTURE
   )
   .trimEnd()
   .concat("\n");
+const SOURCE_PROGRAM = [
+  "# Cocos Skill Program",
+  "",
+  "Bundled program shell v2.",
+  "",
+  "## Project Workflow Overrides",
+  "",
+  "Keep project-specific workflow rules inside the user block below.",
+  "",
+  PROGRAM_USER_BLOCK_START,
+  "## Baseline",
+  "",
+  "- Record the first live readback before mutating anything.",
+  PROGRAM_USER_BLOCK_END,
+  "",
+].join("\n");
 test("syncSkillTemplateFile should migrate a legacy SKILL file to the latest managed template body", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
   const sourcePath = path.join(tempDir, "source", "SKILL.md");
@@ -296,4 +314,48 @@ test("syncSkillTemplateFile should refresh the local-notes shell while keeping t
   assert.match(synced, /Add project-specific notes here/);
   assert.doesNotMatch(synced, /Old shell text/);
   assert.match(synced, new RegExp(LOCAL_NOTES_BLOCK_END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+test("syncTemplateFile should preserve the program user block while refreshing bundled program shell text", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cocos-skill-template-sync-"));
+  const sourcePath = path.join(tempDir, "source-program.md");
+  const targetPath = path.join(tempDir, "target-program.md");
+
+  fs.writeFileSync(sourcePath, SOURCE_PROGRAM, "utf8");
+  fs.writeFileSync(
+    targetPath,
+    [
+      "# Cocos Skill Program",
+      "",
+      "Old program shell text.",
+      "",
+      PROGRAM_USER_BLOCK_START,
+      "## Verification",
+      "",
+      "- Re-run query_nodes after every write.",
+      PROGRAM_USER_BLOCK_END,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = syncTemplateFile(sourcePath, targetPath);
+  const synced = fs.readFileSync(targetPath, "utf8");
+
+  assert.equal(result, "updated");
+  assert.match(synced, /Bundled program shell v2/);
+  assert.match(synced, /Re-run query_nodes after every write/);
+  assert.doesNotMatch(synced, /Old program shell text/);
+});
+test("bundled skill template should route workflow guidance through PROGRAM.md without experience-capture reference", () => {
+  const templateDir = path.join(process.cwd(), "static", "skill-template", "cocos-skill");
+  const skill = fs.readFileSync(path.join(templateDir, "SKILL.md"), "utf8");
+  const workflows = fs.readFileSync(path.join(templateDir, "references", "00-workflows.md"), "utf8");
+  const programPath = path.join(templateDir, "PROGRAM.md");
+  const experienceCapturePath = path.join(templateDir, "references", "12-experience-capture.md");
+
+  assert.equal(fs.existsSync(programPath), true);
+  assert.match(skill, /`PROGRAM\.md`/);
+  assert.match(workflows, /`PROGRAM\.md`/);
+  assert.doesNotMatch(skill, /references\/12-experience-capture\.md/);
+  assert.equal(fs.existsSync(experienceCapturePath), false);
 });
